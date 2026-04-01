@@ -24,7 +24,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # Load API_TOKEN and VNC_DOMAIN from .env
 if [[ -f "$SCRIPT_DIR/.env" ]]; then
   API_TOKEN=$(grep -E '^API_TOKEN=' "$SCRIPT_DIR/.env" | cut -d= -f2-)
-  VNC_DOMAIN=$(grep -E '^VNC_DOMAIN=' "$SCRIPT_DIR/.env" | cut -d= -f2-)
+  TRADE_DOMAIN=$(grep -E '^TRADE_DOMAIN=' "$SCRIPT_DIR/.env" | cut -d= -f2-)
 fi
 
 if [[ -z "${API_TOKEN:-}" ]]; then
@@ -32,8 +32,8 @@ if [[ -z "${API_TOKEN:-}" ]]; then
   exit 1
 fi
 
-if [[ -z "${VNC_DOMAIN:-}" ]]; then
-  echo "Error: VNC_DOMAIN not found in .env"
+if [[ -z "${TRADE_DOMAIN:-}" ]]; then
+  echo "Error: TRADE_DOMAIN not found in .env"
   exit 1
 fi
 
@@ -58,7 +58,7 @@ ABS_QTY="${QTY#-}"
 
 echo "Placing order: $ACTION $ABS_QTY $SYMBOL $ORDER_TYPE${LIMIT_PRICE:+ @ \$$LIMIT_PRICE}"
 
-curl -s -X POST "https://${VNC_DOMAIN}/ibkr/order" \
+curl -s -X POST "https://${TRADE_DOMAIN}/ibkr/order" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer ${API_TOKEN}" \
   -d "$JSON" | python3 -m json.tool 2>/dev/null || echo "Request failed"

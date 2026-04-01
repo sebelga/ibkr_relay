@@ -79,6 +79,11 @@ variable "vnc_domain" {
   type        = string
 }
 
+variable "trade_domain" {
+  description = "Domain for HTTPS trade API (must have DNS A record pointing to droplet)"
+  type        = string
+}
+
 variable "api_token" {
   description = "Bearer token for securing the /ibkr/* API endpoints"
   type        = string

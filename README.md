@@ -5,34 +5,68 @@ One-script deployment of a headless **Interactive Brokers Gateway** with two ser
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  DigitalOcean Droplet (s-1vcpu-2gb, $12/mo)             │
-│                                                         │
-│  ┌─────────────────┐   Docker    ┌────────────────────┐ │
-│  │  ib-gateway      │  Network   │  remote-client     │ │
-│  │  gnzsnz/ib-gw    │◄──────────►│  Python 3.11       │ │
-│  │  API: 4003/4004  │            │  ib_async (future  │ │
-│  │  VNC: 5900       │            │  order placement)  │ │
-│  └────────┬─────────┘            └────────────────────┘ │
-│           │                                             │
-│  ┌────────▼─────────┐            ┌────────────────────┐ │
-│  │  novnc            │            │  poller            │ │
-│  │  Browser VNC      │            │  Flex Web Service  │ │
-│  │  Port: 6080       │            │  → Webhook POST    │ │
-│  └──────────────────┘            │  SQLite dedup      │ │
-│                                  └────────────────────┘ │
-│                                                         │
-│  Firewall: SSH + noVNC from deployer IP only            │
-│  IBKR API ports are internal-only (not exposed)         │
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│  DigitalOcean Droplet (s-1vcpu-2gb, $12/mo)                  │
+│                                                              │
+│  ┌─────────────────┐   Docker    ┌─────────────────────────┐ │
+│  │  ib-gateway      │  Network   │  remote-client          │ │
+│  │  gnzsnz/ib-gw    │◄──────────►│  Python 3.11            │ │
+│  │  API: 4003/4004  │            │  ib_async + HTTP API    │ │
+│  │  VNC: 5900       │            │  (order placement)      │ │
+│  └────────┬─────────┘            └──────────▲──────────────┘ │
+│           │                                 │                │
+│  ┌────────▼─────────┐            ┌──────────┴──────────────┐ │
+│  │  novnc            │            │  poller                 │ │
+│  │  Browser VNC      │            │  Flex Web Service       │ │
+│  │  (2FA access)     │            │  → Webhook POST         │ │
+│  └────────▲─────────┘            │  SQLite dedup           │ │
+│           │                      └─────────────────────────┘ │
+│  ┌────────┴─────────────────────────────────┐                │
+│  │  caddy (reverse proxy + auto HTTPS)      │                │
+│  │  vnc.example.com   → novnc:8080          │                │
+│  │  trade.example.com → webhook-relay:5000  │                │
+│  │  Ports: 80 (HTTP→redirect), 443 (HTTPS)  │                │
+│  └──────────────────────────────────────────┘                │
+│                                                              │
+│  Firewall: SSH from deployer IP, HTTP/HTTPS from anywhere    │
+│  IBKR API ports are internal-only (not exposed)              │
+└──────────────────────────────────────────────────────────────┘
 ```
 
-Four containers in a single Docker network:
+Five containers in a single Docker network:
 
 - **`ib-gateway`** — [`ghcr.io/gnzsnz/ib-gateway:stable`](https://github.com/gnzsnz/ib-gateway-docker). IBC automates login. VNC on port 5900 (raw), API on 4003 (live) / 4004 (paper).
-- **`novnc`** — [`theasp/novnc`](https://hub.docker.com/r/theasp/novnc). Browser-based VNC proxy on port 6080 for completing 2FA.
-- **`remote-client`** — Python image connected to IB Gateway via `ib_async`. Exposes an HTTP API (port 5000, internal) for placing stock orders.
+- **`novnc`** — [`theasp/novnc`](https://hub.docker.com/r/theasp/novnc). Browser-based VNC proxy for completing 2FA.
+- **`caddy`** — [Caddy 2](https://caddyserver.com/) reverse proxy with automatic HTTPS via Let's Encrypt. Routes traffic to the correct backend based on domain (see [Domains & HTTPS](#domains--https)).
+- **`remote-client`** — Python image connected to IB Gateway via `ib_async`. Exposes an HTTP API (internal port 5000) for placing stock orders, secured with Bearer token authentication.
 - **`poller`** — Python image that polls the IBKR Flex Web Service every 10 minutes for trade confirmations and POSTs new fills to a webhook. Uses SQLite for deduplication. **Does not hold an IBKR session** — trade normally via web/mobile.
+
+## Domains & HTTPS
+
+Two domain names are **required**. Caddy uses them to automatically provision TLS certificates from Let's Encrypt, providing secure HTTPS connections. Without valid domains, Caddy cannot obtain certificates and the services will not be accessible — there is no fallback to plain HTTP or IP-based access.
+
+| Environment Variable | Purpose                                                      | Example             |
+| -------------------- | ------------------------------------------------------------ | ------------------- |
+| `VNC_DOMAIN`         | Serves the noVNC interface for IB Gateway 2FA authentication | `vnc.example.com`   |
+| `TRADE_DOMAIN`       | Serves the order placement API (`/ibkr/order`, `/health`)    | `trade.example.com` |
+
+### Setup
+
+1. Point **both** domains to the droplet's reserved IP as **A records**:
+   ```
+   vnc.example.com    A    181.66.270.412
+   trade.example.com  A    181.66.270.412
+   ```
+2. Set both in `.env`:
+   ```
+   VNC_DOMAIN=vnc.example.com
+   TRADE_DOMAIN=trade.example.com
+   ```
+3. Start the stack — Caddy will automatically obtain and renew certificates for both domains.
+
+> **Why two domains?** The VNC interface provides direct access to IB Gateway for 2FA and manual management. The trade API is a separate concern with its own authentication (Bearer token). Separating them on different domains provides clean isolation — you can restrict VNC access at the DNS/firewall level without affecting the trade API, and vice versa.
+
+> **Can I use just an IP address?** No. Let's Encrypt does not issue certificates for bare IP addresses. The Caddy reverse proxy requires valid domain names to provision TLS certificates. Both `VNC_DOMAIN` and `TRADE_DOMAIN` must be set or the stack will refuse to start.
 
 ## Quick Start (Local Deploy)
 
@@ -76,6 +110,9 @@ For automated deployment without local Terraform:
 | `TWS_USERID`            | IBKR username                                 |
 | `TWS_PASSWORD`          | IBKR password                                 |
 | `VNC_SERVER_PASSWORD`   | Password for browser VNC access               |
+| `VNC_DOMAIN`            | Domain for VNC access                         |
+| `TRADE_DOMAIN`          | Domain for trade API                          |
+| `API_TOKEN`             | Bearer token for trade API                    |
 | `IBKR_FLEX_TOKEN`       | Flex Web Service token                        |
 | `IBKR_FLEX_QUERY_ID`    | Trade Confirmation query ID                   |
 | `TARGET_WEBHOOK_URL`    | Webhook destination (leave empty for dry-run) |
@@ -92,19 +129,22 @@ For automated deployment without local Terraform:
 
 All configuration is via environment variables in `.env`:
 
-| Variable                | Required | Default            | Description                                 |
-| ----------------------- | -------- | ------------------ | ------------------------------------------- |
-| `DO_API_TOKEN`          | Yes      | —                  | DigitalOcean API token                      |
-| `TWS_USERID`            | Yes      | —                  | IBKR account username                       |
-| `TWS_PASSWORD`          | Yes      | —                  | IBKR account password                       |
-| `TRADING_MODE`          | No       | `paper`            | `paper` or `live`                           |
-| `VNC_SERVER_PASSWORD`   | Yes      | —                  | Password for noVNC browser access           |
-| `IBKR_FLEX_TOKEN`       | Yes      | —                  | Flex Web Service token (from Client Portal) |
-| `IBKR_FLEX_QUERY_ID`    | Yes      | —                  | Trade Confirmation Flex Query ID            |
-| `TARGET_WEBHOOK_URL`    | No       | —                  | Webhook endpoint (empty = log-only dry-run) |
-| `WEBHOOK_SECRET`        | Yes      | —                  | HMAC-SHA256 key for signing payloads        |
-| `POLL_INTERVAL_SECONDS` | No       | `600`              | Flex poll interval (seconds)                |
-| `TIME_ZONE`             | No       | `America/New_York` | Timezone (tz database format)               |
+| Variable                | Required | Default            | Description                                                    |
+| ----------------------- | -------- | ------------------ | -------------------------------------------------------------- |
+| `DO_API_TOKEN`          | Yes      | —                  | DigitalOcean API token                                         |
+| `TWS_USERID`            | Yes      | —                  | IBKR account username                                          |
+| `TWS_PASSWORD`          | Yes      | —                  | IBKR account password                                          |
+| `TRADING_MODE`          | No       | `paper`            | `paper` or `live`                                              |
+| `VNC_SERVER_PASSWORD`   | Yes      | —                  | Password for noVNC browser access                              |
+| `VNC_DOMAIN`            | Yes      | —                  | Domain for VNC access (see [Domains & HTTPS](#domains--https)) |
+| `TRADE_DOMAIN`          | Yes      | —                  | Domain for trade API (see [Domains & HTTPS](#domains--https))  |
+| `API_TOKEN`             | Yes      | —                  | Bearer token for `/ibkr/*` endpoints (`openssl rand -hex 32`)  |
+| `IBKR_FLEX_TOKEN`       | Yes      | —                  | Flex Web Service token (from Client Portal)                    |
+| `IBKR_FLEX_QUERY_ID`    | Yes      | —                  | Trade Confirmation Flex Query ID                               |
+| `TARGET_WEBHOOK_URL`    | No       | —                  | Webhook endpoint (empty = log-only dry-run)                    |
+| `WEBHOOK_SECRET`        | Yes      | —                  | HMAC-SHA256 key for signing payloads                           |
+| `POLL_INTERVAL_SECONDS` | No       | `600`              | Flex poll interval (seconds)                                   |
+| `TIME_ZONE`             | No       | `America/New_York` | Timezone (tz database format)                                  |
 
 ## Webhook Payload
 
@@ -150,26 +190,30 @@ If `TARGET_WEBHOOK_URL` is empty, the relay logs the payload to stdout (dry-run 
 ```
 ├── deploy.sh              # Local deployment script
 ├── destroy.sh             # Teardown script
-├── order.sh               # Place orders from the command line
+├── order.sh               # Place orders via HTTPS API
 ├── poll-now.sh            # Trigger an immediate Flex poll
 ├── .env.example           # Configuration template
 ├── .github/workflows/
 │   └── deploy.yml         # GitHub Actions workflow
 ├── terraform/
-│   ├── main.tf            # Droplet, firewall, SSH key, provisioners
+│   ├── main.tf            # Droplet, firewall, reserved IP, provisioners
 │   ├── variables.tf       # Terraform variables
-│   ├── outputs.tf         # Droplet IP, VNC URL, SSH key
+│   ├── outputs.tf         # Droplet IP, VNC/Trade URLs, SSH key
 │   ├── cloud-init.sh      # Docker install + repo clone (no secrets)
 │   └── env.tftpl          # .env template for file provisioner
-├── docker-compose.yml     # Container orchestration
+├── docker-compose.yml     # Container orchestration (5 services)
+├── caddy/
+│   └── Caddyfile          # Reverse proxy config (VNC + Trade domains)
+├── novnc/
+│   └── index.html         # VNC web client
 ├── remote-client/
-│   ├── Dockerfile          # Python 3.11-slim image
-│   ├── requirements.txt    # ib_async, aiohttp
-│   └── client.py           # IB Gateway client + HTTP order API
+│   ├── Dockerfile
+│   ├── requirements.txt   # ib_async, aiohttp
+│   └── client.py          # IB Gateway client + authenticated order API
 └── poller/
-    ├── Dockerfile          # Python 3.11-slim image
-    ├── requirements.txt    # httpx
-    └── poller.py           # Flex trade poller + webhook sender
+    ├── Dockerfile
+    ├── requirements.txt   # httpx
+    └── poller.py          # Flex trade poller + webhook sender
 ```
 
 ## Key Design Decisions
@@ -200,7 +244,7 @@ Before deploying, create an Activity Flex Query in IBKR Client Portal:
 
 ## Placing Orders
 
-Place stock orders from your local machine using `order.sh`:
+Place stock orders from your local machine using `order.sh` (reads `TRADE_DOMAIN` and `API_TOKEN` from `.env`):
 
 ```bash
 # Buy 2 shares of TSLA at market
@@ -216,7 +260,16 @@ Place stock orders from your local machine using `order.sh`:
 ./order.sh -2 TSLA LMT 380
 ```
 
-Positive quantity = **BUY**, negative = **SELL**. The script SSHs into the droplet and calls the remote-client's HTTP API internally.
+Positive quantity = **BUY**, negative = **SELL**. The script calls `https://<TRADE_DOMAIN>/ibkr/order` over HTTPS with Bearer token authentication.
+
+You can also call the API directly:
+
+```bash
+curl -X POST https://trade.example.com/ibkr/order \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <API_TOKEN>" \
+  -d '{"quantity": 2, "symbol": "TSLA", "orderType": "MKT"}'
+```
 
 Example response:
 

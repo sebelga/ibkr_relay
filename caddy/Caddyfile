@@ -1,9 +1,7 @@
 {$VNC_DOMAIN} {
-    handle /ibkr/* {
-        reverse_proxy webhook-relay:5000
-    }
+    reverse_proxy novnc:8080
+}
 
-    handle {
-        reverse_proxy novnc:8080
-    }
+{$TRADE_DOMAIN} {
+    reverse_proxy webhook-relay:5000
 }

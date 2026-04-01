@@ -8,6 +8,11 @@ output "vnc_url" {
   value       = "https://${var.vnc_domain}"
 }
 
+output "trade_url" {
+  description = "Trade API base URL"
+  value       = "https://${var.trade_domain}"
+}
+
 output "ssh_private_key" {
   description = "SSH private key for accessing the droplet (save to ~/.ssh/ibkr-relay)"
   value       = tls_private_key.deploy.private_key_openssh
