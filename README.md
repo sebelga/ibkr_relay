@@ -86,14 +86,14 @@ cp .env.example .env
 # Edit .env with your values
 
 # 2. Deploy
-./deploy.sh
+make deploy
 
 # 3. Complete 2FA
-# Open the VNC URL printed by deploy.sh in your browser
+# Open the VNC URL printed by deploy in your browser
 # Log in and approve the 2FA prompt
 
 # 4. Tear down when done
-./destroy.sh
+make destroy
 ```
 
 ## GitHub Actions (Fork & Deploy)
@@ -185,9 +185,41 @@ assert header_value == f"sha256={expected}"
 
 If `TARGET_WEBHOOK_URL` is empty, the relay logs the payload to stdout (dry-run mode) instead of sending it.
 
+## Commands
+
+All operations are available via `make`. Run `make help` to see the full list:
+
+```
+  make deploy      Deploy infrastructure (Terraform + Docker)
+  make destroy     Permanently destroy all infrastructure
+  make pause       Snapshot droplet + delete (save costs)
+  make resume      Restore droplet from snapshot
+  make sync        Push .env + restart all services (or: make sync S=gateway)
+  make order       Place an order (e.g. make order Q=2 SYM=TSLA T=MKT)
+  make poll        Trigger an immediate Flex poll
+  make logs        Stream poller logs (Ctrl+C to stop)
+  make stats       Show container resource usage
+  make ssh         SSH into the droplet
+```
+
+Examples:
+
+```bash
+make deploy                          # provision droplet + start containers
+make sync S=gateway                  # update IBKR credentials on the droplet
+make order Q=2 SYM=TSLA T=MKT       # buy 2 TSLA at market
+make order Q=-2 SYM=TSLA T=LMT P=380  # sell 2 TSLA limit $380
+make poll                            # trigger immediate Flex poll
+make logs                            # stream poller logs
+make logs S=webhook-relay            # stream relay logs
+make pause                           # snapshot + delete droplet
+make resume                          # restore from snapshot
+```
+
 ## Project Structure
 
 ```
+├── Makefile               # CLI commands (make deploy, make sync, etc.)
 ├── deploy.sh              # Local deployment script
 ├── destroy.sh             # Teardown script (permanent)
 ├── pause.sh               # Snapshot + delete droplet (save costs)
@@ -247,7 +279,7 @@ Before deploying, create an Activity Flex Query in IBKR Client Portal:
 
 ## Placing Orders
 
-Place stock orders from your local machine using `order.sh` (reads `TRADE_DOMAIN` and `API_TOKEN` from `.env`):
+Place stock orders from your local machine:
 
 ```bash
 # Buy 2 shares of TSLA at market
@@ -261,6 +293,13 @@ Place stock orders from your local machine using `order.sh` (reads `TRADE_DOMAIN
 
 # Sell 2 shares of TSLA with a limit at $380
 ./order.sh -2 TSLA LMT 380
+```
+
+Or via `make`:
+
+```bash
+make order Q=2 SYM=TSLA T=MKT
+make order Q=-2 SYM=TSLA T=LMT P=380
 ```
 
 Positive quantity = **BUY**, negative = **SELL**. The script calls `https://<TRADE_DOMAIN>/ibkr/order` over HTTPS with Bearer token authentication.
@@ -294,7 +333,7 @@ Example response:
 Trigger an immediate poll without waiting for the next interval:
 
 ```bash
-./poll-now.sh
+make poll
 ```
 
 Or call the endpoint directly with `curl` (useful from machines where `poll-now.sh` is not available):
@@ -321,10 +360,10 @@ To stop billing for the droplet without losing state:
 
 ```bash
 # Snapshot the droplet, unassign the reserved IP, delete the droplet
-./pause.sh
+make pause
 
 # Later — recreate the droplet from the snapshot and reassign the IP
-./resume.sh
+make resume
 ```
 
 **Costs while paused:**
@@ -337,24 +376,22 @@ After resuming, you'll need to complete 2FA again via the VNC interface.
 
 ## SSH Access
 
-The SSH key is saved automatically during deployment. To SSH into the droplet:
-
 ```bash
-ssh -i ~/.ssh/ibkr-relay root@<DROPLET_IP>
+make ssh
 ```
 
 ## Live Logs
 
-To stream poller logs in real-time (useful for checking fill deliveries):
+Stream poller logs in real-time (useful for checking fill deliveries):
 
 ```bash
-ssh -i ~/.ssh/ibkr-relay root@<DROPLET_IP> 'cd /opt/ibkr-relay && docker compose logs -f poller'
+make logs
 ```
 
-To stream remote client logs:
+Stream remote client logs:
 
 ```bash
-ssh -i ~/.ssh/ibkr-relay root@<DROPLET_IP> 'cd /opt/ibkr-relay && docker compose logs -f webhook-relay'
+make logs S=webhook-relay
 ```
 
 ## Security
