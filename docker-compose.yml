@@ -1,0 +1,42 @@
+name: ibkr-relay
+
+services:
+  ib-gateway:
+    image: ghcr.io/gnzsnz/ib-gateway:stable
+    restart: always
+    env_file: .env
+    environment:
+      TWOFA_TIMEOUT_ACTION: restart
+      RELOGIN_AFTER_TWOFA_TIMEOUT: "yes"
+      AUTO_RESTART_TIME: "11:59 PM"
+      EXISTING_SESSION_DETECTED_ACTION: primary
+      TZ: ${TIME_ZONE:-America/New_York}
+    expose:
+      - "4003"
+      - "4004"
+      - "5900"
+
+  novnc:
+    image: theasp/novnc:latest
+    restart: always
+    depends_on:
+      - ib-gateway
+    environment:
+      DISPLAY_WIDTH: 1024
+      DISPLAY_HEIGHT: 768
+      RUN_XTERM: "no"
+      REMOTE_HOST: ib-gateway
+      REMOTE_PORT: 5900
+    ports:
+      - "6080:8080"
+
+  webhook-relay:
+    build: ./relay
+    restart: always
+    depends_on:
+      - ib-gateway
+    env_file: .env
+    environment:
+      IB_HOST: ib-gateway
+      IB_LIVE_PORT: "4003"
+      IB_PAPER_PORT: "4004"

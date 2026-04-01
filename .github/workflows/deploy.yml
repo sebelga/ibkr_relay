@@ -1,0 +1,73 @@
+name: Deploy IBKR Relay
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Action to perform"
+        required: true
+        type: choice
+        options:
+          - deploy
+          - destroy
+
+env:
+  TF_VAR_do_token: ${{ secrets.DO_API_TOKEN }}
+  TF_VAR_tws_userid: ${{ secrets.TWS_USERID }}
+  TF_VAR_tws_password: ${{ secrets.TWS_PASSWORD }}
+  TF_VAR_trading_mode: ${{ secrets.TRADING_MODE || 'paper' }}
+  TF_VAR_vnc_password: ${{ secrets.VNC_SERVER_PASSWORD }}
+  TF_VAR_webhook_url: ${{ secrets.TARGET_WEBHOOK_URL }}
+  TF_VAR_webhook_secret: ${{ secrets.WEBHOOK_SECRET }}
+  TF_VAR_time_zone: ${{ secrets.TIME_ZONE || 'America/New_York' }}
+  AWS_ACCESS_KEY_ID: ${{ secrets.SPACES_ACCESS_KEY }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.SPACES_SECRET_KEY }}
+
+jobs:
+  deploy:
+    name: Terraform ${{ github.event.inputs.action }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_wrapper: false
+
+      - name: Terraform Init
+        working-directory: terraform
+        run: |
+          terraform init -input=false \
+            -backend-config="access_key=$AWS_ACCESS_KEY_ID" \
+            -backend-config="secret_key=$AWS_SECRET_ACCESS_KEY"
+
+      - name: Terraform Apply
+        if: github.event.inputs.action == 'deploy'
+        working-directory: terraform
+        run: |
+          terraform plan -input=false -out=tfplan
+          terraform apply -input=false -auto-approve tfplan
+
+      - name: Show Outputs
+        if: github.event.inputs.action == 'deploy'
+        working-directory: terraform
+        run: |
+          echo "## Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Resource | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Droplet IP | \`$(terraform output -raw droplet_ip)\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| VNC URL | $(terraform output -raw vnc_url) |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "1. Open the VNC URL in your browser" >> $GITHUB_STEP_SUMMARY
+          echo "2. Complete the IBKR 2FA handshake" >> $GITHUB_STEP_SUMMARY
+          echo "3. The relay will start listening for order fills" >> $GITHUB_STEP_SUMMARY
+
+      - name: Terraform Destroy
+        if: github.event.inputs.action == 'destroy'
+        working-directory: terraform
+        run: terraform destroy -auto-approve -input=false
