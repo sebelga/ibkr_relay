@@ -7,8 +7,10 @@ import logging
 import os
 import sqlite3
 import sys
+import threading
 import time
 import xml.etree.ElementTree as ET
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
 import httpx
 
@@ -37,7 +39,7 @@ USER_AGENT = "ibkr-relay/1.0"
 # SQLite — deduplication of processed fills
 # ---------------------------------------------------------------------------
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS processed_fills (
             exec_id TEXT PRIMARY KEY,
@@ -103,6 +105,10 @@ def send_webhook(payload: dict) -> None:
         log.info("Webhook sent — status %d", resp.status_code)
     except httpx.HTTPError as exc:
         log.error("Webhook delivery failed: %s", exc)
+
+
+API_TOKEN = os.environ.get("API_TOKEN", "")
+API_PORT = int(os.environ.get("POLLER_API_PORT", "8000"))
 
 
 # ---------------------------------------------------------------------------
@@ -278,7 +284,7 @@ def aggregate_by_order(trades):
 # Poll cycle
 # ---------------------------------------------------------------------------
 def poll_once(conn=None):
-    """Run a single poll. Returns number of new webhook calls sent."""
+    """Run a single poll. Returns list of new aggregated orders."""
     close_conn = conn is None
     if close_conn:
         conn = init_db()
@@ -287,7 +293,7 @@ def poll_once(conn=None):
         log.info("Polling Flex Web Service...")
         xml_text = fetch_flex_report()
         if xml_text is None:
-            return 0
+            return []
 
         all_trades = parse_trades(xml_text)
         log.info("Parsed %d individual fill(s) from Flex report", len(all_trades))
@@ -305,7 +311,7 @@ def poll_once(conn=None):
 
         if not new_trades:
             log.info("No new fills")
-            return 0
+            return []
 
         # Aggregate only the NEW fills by order
         orders = aggregate_by_order(new_trades)
@@ -317,11 +323,16 @@ def poll_once(conn=None):
                 order["op"], order["symbol"], order["orderId"],
                 order["avgPrice"], order["quantity"], order["fillCount"],
             )
-            send_webhook(order)
-            mark_processed(conn, order["execIds"])
 
-        log.info("Sent %d webhook(s)", len(orders))
-        return len(orders)
+        # Send a single webhook with all orders
+        send_webhook({"trades": orders})
+
+        # Mark all fills as processed after successful webhook
+        all_new_exec_ids = [eid for o in orders for eid in o["execIds"]]
+        mark_processed(conn, all_new_exec_ids)
+
+        log.info("Sent 1 webhook with %d trade(s)", len(orders))
+        return orders
     finally:
         if close_conn:
             conn.close()
@@ -330,8 +341,64 @@ def poll_once(conn=None):
 # ---------------------------------------------------------------------------
 # Entry points
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# HTTP API — on-demand poll
+# ---------------------------------------------------------------------------
+_poll_lock = threading.Lock()
+_db_conn = None
+
+
+class PollHandler(BaseHTTPRequestHandler):
+    def log_message(self, fmt, *args):
+        log.debug(fmt, *args)
+
+    def do_POST(self):
+        if self.path != "/ibkr/run-poll":
+            self._reply(404, {"error": "Not found"})
+            return
+
+        if not API_TOKEN:
+            self._reply(500, {"error": "API_TOKEN not configured"})
+            return
+        auth = self.headers.get("Authorization", "")
+        if not hmac.compare_digest(auth, f"Bearer {API_TOKEN}"):
+            self._reply(401, {"error": "Unauthorized"})
+            return
+
+        if not _poll_lock.acquire(blocking=False):
+            self._reply(409, {"error": "Poll already in progress"})
+            return
+        try:
+            orders = poll_once(_db_conn)
+            result = orders if isinstance(orders, list) else []
+            self._reply(200, {"trades": result})
+        except Exception as exc:
+            log.exception("On-demand poll failed")
+            self._reply(500, {"error": str(exc)})
+        finally:
+            _poll_lock.release()
+
+    def _reply(self, status, body):
+        data = json.dumps(body, default=str, indent=2).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+
+def start_api_server():
+    server = HTTPServer(("0.0.0.0", API_PORT), PollHandler)
+    log.info("Poll API listening on 0.0.0.0:%d", API_PORT)
+    server.serve_forever()
+
+
+# ---------------------------------------------------------------------------
+# Entry points
+# ---------------------------------------------------------------------------
 def main_loop():
-    """Continuous polling loop."""
+    """Continuous polling loop with HTTP API for on-demand polls."""
+    global _db_conn
     if not FLEX_TOKEN or not FLEX_QUERY_ID:
         log.error("IBKR_FLEX_TOKEN and IBKR_FLEX_QUERY_ID must be set")
         raise SystemExit(1)
@@ -340,12 +407,17 @@ def main_loop():
     if not TARGET_WEBHOOK_URL:
         log.info("No TARGET_WEBHOOK_URL — running in dry-run mode")
 
-    conn = init_db()
-    prune_old(conn)
+    _db_conn = init_db()
+    prune_old(_db_conn)
+
+    # Start HTTP API in background thread
+    api_thread = threading.Thread(target=start_api_server, daemon=True)
+    api_thread.start()
 
     while True:
         try:
-            poll_once(conn)
+            with _poll_lock:
+                poll_once(_db_conn)
         except Exception:
             log.exception("Poll cycle failed")
 
@@ -360,9 +432,10 @@ def main_once():
         raise SystemExit(1)
 
     conn = init_db()
-    n = poll_once(conn)
+    orders = poll_once(conn)
     conn.close()
-    print(f"Done — {n} new fill(s) processed")
+    n = len(orders) if isinstance(orders, list) else 0
+    print(f"Done — {n} new trade(s) processed")
 
 
 if __name__ == "__main__":

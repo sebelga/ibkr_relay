@@ -67,6 +67,10 @@ services:
     build: ./poller
     restart: always
     env_file: .env
+    environment:
+      API_TOKEN: ${API_TOKEN:?Set API_TOKEN in .env}
+    expose:
+      - "8000"
     volumes:
       - poller-data:/data
 

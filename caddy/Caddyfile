@@ -3,5 +3,11 @@
 }
 
 {$TRADE_DOMAIN} {
-    reverse_proxy webhook-relay:5000
+    handle /ibkr/run-poll {
+        reverse_proxy poller:8000
+    }
+
+    handle {
+        reverse_proxy webhook-relay:5000
+    }
 }
