@@ -16,9 +16,9 @@ One-script deployment of a headless **Interactive Brokers Gateway** with two ser
 │  └────────┬─────────┘            └──────────▲──────────────┘ │
 │           │                                 │                │
 │  ┌────────▼─────────┐            ┌──────────┴──────────────┐ │
-│  │  novnc            │            │  poller                 │ │
-│  │  Browser VNC      │            │  Flex Web Service       │ │
-│  │  (2FA access)     │            │  → Webhook POST         │ │
+│  │  novnc            │           │  poller                 │ │
+│  │  Browser VNC      │           │  Flex Web Service       │ │
+│  │  (2FA access)     │           │  → Webhook POST         │ │
 │  └────────▲─────────┘            │  SQLite dedup           │ │
 │           │                      └─────────────────────────┘ │
 │  ┌────────┴─────────────────────────────────┐                │
@@ -294,11 +294,12 @@ Trigger an immediate poll without waiting for the next interval:
 ./poll-now.sh
 ```
 
-Or directly on the droplet:
+Or call the endpoint directly with `curl` (useful from machines where `poll-now.sh` is not available):
 
 ```bash
-ssh -i ~/.ssh/ibkr-relay root@<DROPLET_IP> \
-  'cd /opt/ibkr-relay && docker compose exec -T poller python poller.py --once'
+source .env && curl -s -X POST "https://${TRADE_DOMAIN}/ibkr/run-poll" \
+  -H "Authorization: Bearer ${API_TOKEN}" \
+  | python3 -m json.tool
 ```
 
 ## SSH Access
