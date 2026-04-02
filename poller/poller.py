@@ -46,8 +46,30 @@ def init_db():
             processed_at TEXT DEFAULT (datetime('now'))
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS metadata (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )
+    """)
     conn.commit()
     return conn
+
+
+def get_last_poll_ts(conn):
+    """Return the last processed trade timestamp, or empty string."""
+    row = conn.execute(
+        "SELECT value FROM metadata WHERE key = 'last_poll_ts'"
+    ).fetchone()
+    return row[0] if row else ""
+
+
+def set_last_poll_ts(conn, ts):
+    """Update the last processed trade timestamp."""
+    conn.execute(
+        "INSERT OR REPLACE INTO metadata (key, value) VALUES ('last_poll_ts', ?)",
+        (ts,),
+    )
 
 
 def get_processed_ids(conn, exec_ids):
@@ -305,10 +327,21 @@ def poll_once(conn=None, flex_token=None, flex_query_id=None):
         if all_orders:
             log.info("Sample order (first):\n%s", json.dumps(all_orders[0], default=str, indent=2))
 
-        # Filter out already-processed fills
-        all_exec_ids = {t["execId"] for t in all_trades}
-        already_seen = get_processed_ids(conn, all_exec_ids)
-        new_trades = [t for t in all_trades if t["execId"] not in already_seen]
+        # Pre-filter by timestamp watermark to reduce dedup work
+        last_ts = get_last_poll_ts(conn)
+        if last_ts:
+            # Keep trades with timestamp >= last_ts (equal to handle same-second fills)
+            candidates = [t for t in all_trades if t["tradeTime"] >= last_ts]
+            log.info("Timestamp pre-filter: %d -> %d candidate(s) (watermark: %s)",
+                     len(all_trades), len(candidates), last_ts)
+        else:
+            candidates = all_trades
+            log.info("No timestamp watermark — processing all %d fill(s)", len(candidates))
+
+        # Dedup remaining candidates against stored exec IDs
+        candidate_ids = {t["execId"] for t in candidates}
+        already_seen = get_processed_ids(conn, candidate_ids)
+        new_trades = [t for t in candidates if t["execId"] not in already_seen]
         log.info("%d new fill(s) after dedup", len(new_trades))
 
         if not new_trades:
@@ -332,6 +365,11 @@ def poll_once(conn=None, flex_token=None, flex_query_id=None):
         # Mark all fills as processed after successful webhook
         all_new_exec_ids = [eid for o in orders for eid in o["execIds"]]
         mark_processed(conn, all_new_exec_ids)
+
+        # Update timestamp watermark to the latest trade time
+        max_ts = max(t["tradeTime"] for t in new_trades)
+        set_last_poll_ts(conn, max_ts)
+        log.info("Updated timestamp watermark to %s", max_ts)
 
         log.info("Sent 1 webhook with %d trade(s)", len(orders))
         return orders
