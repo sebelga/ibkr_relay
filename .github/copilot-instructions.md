@@ -26,6 +26,12 @@ Six Docker containers in a single Compose stack on a DigitalOcean droplet:
 All secrets are injected via `.env` → `env_file` or `environment` in `docker-compose.yml`.
 Caddy reads `VNC_DOMAIN` and `TRADE_DOMAIN` from env vars — the Caddyfile uses `{$VNC_DOMAIN}` / `{$TRADE_DOMAIN}` syntax.
 
+## Memory & Droplet Sizing
+
+- `JAVA_HEAP_SIZE` in `.env` controls IB Gateway's JVM heap (in MB, default 768, max 10240).
+- **Droplet size is auto-selected** by Terraform based on this value (see `locals` block in `main.tf`).
+- `resume.sh` mirrors the same size-selection logic in shell.
+
 ## Auth Pattern
 
 - API endpoints under `/ibkr/*` require `Authorization: Bearer <API_TOKEN>` (HMAC-safe comparison via `hmac.compare_digest`).

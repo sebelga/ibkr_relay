@@ -10,6 +10,7 @@ services:
       RELOGIN_AFTER_TWOFA_TIMEOUT: "no"
       EXISTING_SESSION_DETECTED_ACTION: primary
       READ_ONLY_API: "no"
+      JAVA_HEAP_SIZE: ${JAVA_HEAP_SIZE:-}
       TZ: ${TIME_ZONE:-America/New_York}
     expose:
       - "4003"

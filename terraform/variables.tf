@@ -68,6 +68,12 @@ variable "time_zone" {
   default     = "America/New_York"
 }
 
+variable "java_heap_size" {
+  description = "IB Gateway Java heap size in MB (determines droplet size)"
+  type        = string
+  default     = "768"
+}
+
 variable "droplet_region" {
   description = "DigitalOcean region for the droplet"
   type        = string

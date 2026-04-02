@@ -6,7 +6,7 @@ One-script deployment of a headless **Interactive Brokers Gateway** with two ser
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│  DigitalOcean Droplet (s-1vcpu-2gb, $12/mo)                  │
+│  DigitalOcean Droplet (auto-sized based on JAVA_HEAP_SIZE)    │
 │                                                              │
 │  ┌─────────────────┐   Docker    ┌─────────────────────────┐ │
 │  │  ib-gateway     │  Network   │  remote-client           │ │
@@ -69,6 +69,24 @@ Two domain names are **required**. Caddy uses them to automatically provision TL
 > **Why two domains?** The VNC interface provides direct access to IB Gateway for 2FA and manual management. The trade API is a separate concern with its own authentication (Bearer token). Separating them on different domains provides clean isolation — you can restrict VNC access at the DNS/firewall level without affecting the trade API, and vice versa.
 
 > **Can I use just an IP address?** No. Let's Encrypt does not issue certificates for bare IP addresses. The Caddy reverse proxy requires valid domain names to provision TLS certificates. Both `VNC_DOMAIN` and `TRADE_DOMAIN` must be set or the stack will refuse to start.
+
+## Memory & Droplet Sizing
+
+IB Gateway runs on Java and its performance depends on the heap memory allocation. Set `JAVA_HEAP_SIZE` in `.env` (in MB) to control this. The droplet size is **automatically selected** to fit the requested heap plus OS/Docker overhead:
+
+| `JAVA_HEAP_SIZE` | Droplet Size   | RAM   | Approx. Cost |
+| ---------------- | -------------- | ----- | ------------ |
+| ≤ 1024 (default) | `s-1vcpu-2gb`  | 2 GB  | ~$12/mo      |
+| 1025 – 3072      | `s-2vcpu-4gb`  | 4 GB  | ~$24/mo      |
+| 3073 – 6144      | `s-4vcpu-8gb`  | 8 GB  | ~$48/mo      |
+| 6145 – 10240     | `s-8vcpu-16gb` | 16 GB | ~$96/mo      |
+
+IBKR recommends **4096** for API users. The default (768) works but may be slow for data-heavy operations.
+
+```env
+# .env
+JAVA_HEAP_SIZE=4096
+```
 
 ## Quick Start (Local Deploy)
 

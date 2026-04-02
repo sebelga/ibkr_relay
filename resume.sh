@@ -32,6 +32,15 @@ echo "Resuming from snapshot: $SNAPSHOT_NAME ($SNAPSHOT_ID)"
 echo "  Region: $DROPLET_REGION"
 echo "  Reserved IP: $RESERVED_IP"
 
+# Select droplet size based on JAVA_HEAP_SIZE
+_HEAP="${JAVA_HEAP_SIZE:-768}"
+if   [[ "$_HEAP" -le 1024 ]]; then DROPLET_SIZE="s-1vcpu-2gb"
+elif [[ "$_HEAP" -le 3072 ]]; then DROPLET_SIZE="s-2vcpu-4gb"
+elif [[ "$_HEAP" -le 6144 ]]; then DROPLET_SIZE="s-4vcpu-8gb"
+else                               DROPLET_SIZE="s-8vcpu-16gb"
+fi
+echo "  Droplet size: $DROPLET_SIZE (heap ${_HEAP}MB)"
+
 # ---------------------------------------------------------------------------
 # 1. Find the SSH key ID on DigitalOcean
 # ---------------------------------------------------------------------------
@@ -62,7 +71,7 @@ DROPLET_ID=$(curl -s -X POST -H "$AUTH" -H "Content-Type: application/json" \
   -d "{
     \"name\": \"ibkr-relay\",
     \"region\": \"$DROPLET_REGION\",
-    \"size\": \"s-1vcpu-2gb\",
+    \"size\": \"$DROPLET_SIZE\",
     \"image\": $SNAPSHOT_ID,
     \"ssh_keys\": $SSH_KEYS_PARAM
   }" | python3 -c "import json,sys; print(json.load(sys.stdin)['droplet']['id'])")

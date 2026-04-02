@@ -44,6 +44,7 @@ export TF_VAR_flex_token="$IBKR_FLEX_TOKEN"
 export TF_VAR_flex_query_id="$IBKR_FLEX_QUERY_ID"
 export TF_VAR_poll_interval="${POLL_INTERVAL_SECONDS:-600}"
 export TF_VAR_time_zone="${TIME_ZONE:-America/New_York}"
+export TF_VAR_java_heap_size="${JAVA_HEAP_SIZE:-768}"
 
 # Run Terraform
 cd terraform
