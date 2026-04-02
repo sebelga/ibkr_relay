@@ -29,6 +29,8 @@ FLEX_QUERY_ID = os.environ.get("IBKR_FLEX_QUERY_ID", "")
 POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL_SECONDS", "600"))
 TARGET_WEBHOOK_URL = os.environ.get("TARGET_WEBHOOK_URL", "")
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "")
+WEBHOOK_HEADER_NAME = os.environ.get("WEBHOOK_HEADER_NAME", "")
+WEBHOOK_HEADER_VALUE = os.environ.get("WEBHOOK_HEADER_VALUE", "")
 DB_PATH = os.environ.get("DB_PATH", "/data/poller.db")
 
 FLEX_BASE = "https://ndcdyn.interactivebrokers.com/AccountManagement/FlexWebService"
@@ -115,13 +117,17 @@ def send_webhook(payload: dict) -> None:
     ).hexdigest()
 
     try:
+        headers = {
+            "Content-Type": "application/json",
+            "X-Signature-256": f"sha256={signature}",
+        }
+        if WEBHOOK_HEADER_NAME:
+            headers[WEBHOOK_HEADER_NAME] = WEBHOOK_HEADER_VALUE
+
         resp = httpx.post(
             TARGET_WEBHOOK_URL,
             content=body,
-            headers={
-                "Content-Type": "application/json",
-                "X-Signature-256": f"sha256={signature}",
-            },
+            headers=headers,
             timeout=10.0,
         )
         log.info("Webhook sent — status %d", resp.status_code)
@@ -307,7 +313,7 @@ def aggregate_by_order(trades):
 # ---------------------------------------------------------------------------
 # Poll cycle
 # ---------------------------------------------------------------------------
-def poll_once(conn=None, flex_token=None, flex_query_id=None):
+def poll_once(conn=None, flex_token=None, flex_query_id=None, debug=False):
     """Run a single poll. Returns list of new aggregated orders."""
     close_conn = conn is None
     if close_conn:
@@ -322,6 +328,18 @@ def poll_once(conn=None, flex_token=None, flex_query_id=None):
         all_trades = parse_trades(xml_text)
         log.info("Parsed %d individual fill(s) from Flex report", len(all_trades))
 
+        if debug:
+            print("--- Raw Flex XML ---")
+            print(xml_text)
+            print("--- End Raw Flex XML ---")
+
+        if all_trades:
+            trade_times = [t["tradeTime"] for t in all_trades]
+            log.info("Trade time range: %s to %s", min(trade_times), max(trade_times))
+            for t in all_trades:
+                log.info("  Fill: %s %s execId=%s tradeTime=%s",
+                         t["op"], t["symbol"], t["execId"], t["tradeTime"])
+
         # Always show a sample of the first aggregated order for debugging
         all_orders = aggregate_by_order(all_trades)
         if all_orders:
@@ -334,6 +352,11 @@ def poll_once(conn=None, flex_token=None, flex_query_id=None):
             candidates = [t for t in all_trades if t["tradeTime"] >= last_ts]
             log.info("Timestamp pre-filter: %d -> %d candidate(s) (watermark: %s)",
                      len(all_trades), len(candidates), last_ts)
+            if len(candidates) < len(all_trades):
+                filtered = [t for t in all_trades if t["tradeTime"] < last_ts]
+                for t in filtered:
+                    log.info("  Filtered out: %s %s tradeTime=%s < watermark %s",
+                             t["op"], t["symbol"], t["tradeTime"], last_ts)
         else:
             candidates = all_trades
             log.info("No timestamp watermark — processing all %d fill(s)", len(candidates))
@@ -483,8 +506,9 @@ def main_once():
         log.error("IBKR_FLEX_TOKEN and IBKR_FLEX_QUERY_ID must be set")
         raise SystemExit(1)
 
+    debug = "--debug" in sys.argv
     conn = init_db()
-    orders = poll_once(conn)
+    orders = poll_once(conn, debug=debug)
     conn.close()
     n = len(orders) if isinstance(orders, list) else 0
     print(f"Done — {n} new trade(s) processed")
