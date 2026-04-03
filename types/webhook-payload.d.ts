@@ -5,50 +5,105 @@
  * and run json-schema-to-typescript to regenerate this file.
  */
 
-export type Event = "fill";
-export type Symbol = string;
-export type Underlyingsymbol = string;
-export type Sectype = string;
-export type Exchange = string;
-export type Op = string;
-export type Quantity = number;
-export type Avgprice = number;
-export type Tradedate = string;
-export type Lastfilltime = string;
-export type Ordertime = string;
-export type Orderid = string;
-export type Execids = string[];
-export type Account = string;
-export type Commission = number;
-export type Commissioncurrency = string;
-export type Currency = string;
-export type Ordertype = string;
-export type Fillcount = number;
-export type Trades = Fill[];
-
 export interface WebhookPayload {
-  trades: Trades;
+  trades: Trade[];
+  errors?: string[];
   [k: string]: unknown;
 }
-export interface Fill {
-  event?: Event;
-  symbol: Symbol;
-  underlyingSymbol: Underlyingsymbol;
-  secType: Sectype;
-  exchange: Exchange;
-  op: Op;
-  quantity: Quantity;
-  avgPrice: Avgprice;
-  tradeDate: Tradedate;
-  lastFillTime: Lastfilltime;
-  orderTime: Ordertime;
-  orderId: Orderid;
-  execIds: Execids;
-  account: Account;
-  commission: Commission;
-  commissionCurrency: Commissioncurrency;
-  currency: Currency;
-  orderType: Ordertype;
-  fillCount: Fillcount;
+/**
+ * Aggregated trade — one or more fills grouped by orderId.
+ *
+ * Numeric fields (quantity, price, commission, taxes, …) are aggregated.
+ * String fields use the last fill's value.
+ * ``price`` is the quantity-weighted average across fills.
+ */
+export interface Trade {
+  accountId?: string;
+  acctAlias?: string;
+  model?: string;
+  currency?: string;
+  fxRateToBase?: number;
+  assetCategory?: string;
+  subCategory?: string;
+  symbol?: string;
+  description?: string;
+  conid?: string;
+  securityID?: string;
+  securityIDType?: string;
+  cusip?: string;
+  isin?: string;
+  figi?: string;
+  listingExchange?: string;
+  multiplier?: string;
+  underlyingConid?: string;
+  underlyingSymbol?: string;
+  underlyingSecurityID?: string;
+  underlyingListingExchange?: string;
+  issuer?: string;
+  issuerCountryCode?: string;
+  strike?: string;
+  expiry?: string;
+  putCall?: string;
+  tradeID?: string;
+  transactionId?: string;
+  ibExecId?: string;
+  brokerageOrderID?: string;
+  exchOrderId?: string;
+  extExecID?: string;
+  orderId?: string;
+  orderTime?: string;
+  orderType?: string;
+  orderReference?: string;
+  transactionType?: string;
+  exchange?: string;
+  buySell?: string;
+  quantity?: number;
+  price?: number;
+  taxes?: number;
+  commission?: number;
+  commissionCurrency?: string;
+  cost?: number;
+  fifoPnlRealized?: number;
+  tradeMoney?: number;
+  proceeds?: number;
+  netCash?: number;
+  closePrice?: number;
+  mtmPnl?: number;
+  accruedInt?: number;
+  dateTime?: string;
+  tradeDate?: string;
+  reportDate?: string;
+  settleDateTarget?: string;
+  openCloseIndicator?: string;
+  notes?: string;
+  origTradePrice?: string;
+  origTradeDate?: string;
+  origTradeID?: string;
+  origOrderID?: string;
+  origTransactionID?: string;
+  clearingFirmID?: string;
+  relatedTradeID?: string;
+  relatedTransactionID?: string;
+  rtn?: string;
+  volatilityOrderLink?: string;
+  openDateTime?: string;
+  holdingPeriodDateTime?: string;
+  whenRealized?: string;
+  whenReopened?: string;
+  levelOfDetail?: string;
+  changeInPrice?: string;
+  changeInQuantity?: string;
+  traderID?: string;
+  isAPIOrder?: string;
+  principalAdjustFactor?: string;
+  initialInvestment?: string;
+  positionActionID?: string;
+  serialNumber?: string;
+  deliveryType?: string;
+  commodityType?: string;
+  fineness?: string;
+  weight?: string;
+  execIds?: string[];
+  fillCount?: number;
   [k: string]: unknown;
 }

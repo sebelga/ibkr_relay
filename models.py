@@ -152,5 +152,23 @@ if __name__ == "__main__":
     import sys
 
     schema = WebhookPayload.model_json_schema()
+
+    # Strip per-property "title" keys so json-schema-to-typescript
+    # inlines primitive types (string, number) instead of emitting
+    # a named type alias for every single field.
+    def _strip_titles(obj: object) -> None:
+        if isinstance(obj, dict):
+            for key, val in list(obj.items()):
+                if key == "properties" and isinstance(val, dict):
+                    for prop in val.values():
+                        if isinstance(prop, dict):
+                            prop.pop("title", None)
+                _strip_titles(val)
+        elif isinstance(obj, list):
+            for item in obj:
+                _strip_titles(item)
+
+    _strip_titles(schema)
+
     json.dump(schema, sys.stdout, indent=2)
     sys.stdout.write("\n")
