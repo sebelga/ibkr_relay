@@ -1,0 +1,11 @@
+{
+  "name": "@tradegist/ibkr-types",
+  "version": "0.1.0",
+  "description": "TypeScript types for IBKR Webhook Relay — webhook payloads and order placement",
+  "types": "index.d.ts",
+  "files": [
+    "index.d.ts",
+    "webhook.d.ts"
+  ],
+  "license": "MIT"
+}

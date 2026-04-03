@@ -34,9 +34,9 @@ test-webhook: ## Send sample trades to webhook endpoint (make test-webhook [S=2]
 	python3 -m cli test-webhook $(S)
 
 types: ## Regenerate TypeScript types from Pydantic models
-	python3 models.py > types/webhook-payload.schema.json
-	npx --yes json-schema-to-typescript types/webhook-payload.schema.json > types/webhook-payload.d.ts
-	@echo "Generated types/webhook-payload.d.ts"
+	python3 models.py > types/webhook.schema.json
+	npx --yes json-schema-to-typescript types/webhook.schema.json > types/webhook.d.ts
+	@echo "Generated types/webhook.d.ts"
 
 test: ## Run unit tests
 	PYTHONPATH=. python3 -m pytest poller/ -v
