@@ -7,7 +7,7 @@ import logging
 
 from aiohttp import web
 
-from ib_client import IBClient
+from client import IBClient
 
 log = logging.getLogger("routes")
 
@@ -53,7 +53,7 @@ async def handle_order(request: web.Request) -> web.Response:
         )
 
     try:
-        result = await client.place_order(
+        result = await client.orders.place(
             symbol=symbol,
             quantity=quantity,
             order_type=order_type,

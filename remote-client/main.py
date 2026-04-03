@@ -9,7 +9,7 @@ import os
 
 from aiohttp import web
 
-from ib_client import IBClient
+from client import IBClient
 from routes import create_routes
 
 logging.basicConfig(

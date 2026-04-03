@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from aiohttp import web
 
-from ib_client import IBClient
+from client import IBClient
 from routes.handlers import handle_health
 from routes.middlewares import auth_middleware
 from routes.order_place import handle_order
