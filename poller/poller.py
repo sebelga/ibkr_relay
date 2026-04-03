@@ -1,4 +1,4 @@
-"""IBKR Flex Poller — polls Trade Confirmation Flex Queries and fires webhooks."""
+"""IBKR Flex Poller — polls Activity and Trade Confirmation Flex Queries and fires webhooks."""
 
 from __future__ import annotations
 

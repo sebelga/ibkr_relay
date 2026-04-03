@@ -6,11 +6,13 @@ Trade = one or more fills aggregated by orderId.
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class Fill(BaseModel):
     """Individual execution / fill from IBKR Flex XML."""
+
+    model_config = ConfigDict(extra="forbid")
 
     # ── Account ──────────────────────────────────────────────────────────
     accountId: str = ""
@@ -138,13 +140,15 @@ class Trade(Fill):
     ``price`` is the quantity-weighted average across fills.
     """
 
-    execIds: list[str] = []
+    execIds: list[str] = Field(default_factory=list)
     fillCount: int = 0
 
 
 class WebhookPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     trades: list[Trade]
-    errors: list[str] = []
+    errors: list[str] = Field(default_factory=list)
 
 
 if __name__ == "__main__":

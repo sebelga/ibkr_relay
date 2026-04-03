@@ -155,6 +155,12 @@ class TestParseFillsBasic:
         assert fills == []
         assert errors == []
 
+    def test_malformed_xml_returns_error(self) -> None:
+        fills, errors = parse_fills("this is not xml at all <<<")
+        assert fills == []
+        assert len(errors) == 1
+        assert "Failed to parse Flex XML" in errors[0]
+
 
 # ═════════════════════════════════════════════════════════════════════════
 #  Alias / field normalization

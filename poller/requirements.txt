@@ -1,2 +1,2 @@
-httpx
-pydantic
+httpx==0.28.1
+pydantic==2.12.5

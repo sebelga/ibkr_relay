@@ -8,7 +8,6 @@
 export interface WebhookPayload {
   trades: Trade[];
   errors?: string[];
-  [k: string]: unknown;
 }
 /**
  * Aggregated trade — one or more fills grouped by orderId.
@@ -105,5 +104,4 @@ export interface Trade {
   weight?: string;
   execIds?: string[];
   fillCount?: number;
-  [k: string]: unknown;
 }

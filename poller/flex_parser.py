@@ -70,9 +70,15 @@ def parse_fills(xml_text: str) -> tuple[list[Fill], list[str]]:
     unknown attributes and any per-row parse problems.  Parsing never
     raises — broken rows are skipped and reported in *errors*.
     """
-    root = ET.fromstring(xml_text)
     fills: list[Fill] = []
     errors: list[str] = []
+
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError as exc:
+        errors.append(f"Failed to parse Flex XML: {exc}")
+        return fills, errors
+
     seen: set[str] = set()
     reported_unknown: set[str] = set()
 

@@ -3,7 +3,7 @@
 help: ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  make %-12s %s\n", $$1, $$2}'
 
-setup: ## Install dev dependencies (mypy, pydantic)
+setup: ## Install dev dependencies (mypy, pydantic, pytest)
 	pip3 install -r requirements-dev.txt
 
 deploy: ## Deploy infrastructure (Terraform + Docker)
