@@ -14,7 +14,7 @@ def _preflight_check() -> None:
     """Fail fast if poller is unreachable."""
     try:
         resp = httpx.get(f"{BASE_URL}/health", timeout=5.0)
-    except httpx.ConnectError:
+    except httpx.HTTPError:
         pytest.exit(
             f"poller is not reachable at {BASE_URL}. "
             "Is the E2E stack running? (make e2e-up)",

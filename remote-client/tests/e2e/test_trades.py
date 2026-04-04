@@ -103,7 +103,19 @@ def test_limit_buy_below_market(api: httpx.Client) -> None:
 
 
 def test_market_sell_appears_in_trades(api: httpx.Client) -> None:
-    """Sell 1 AAPL (position from test_market_buy)."""
+    """Create an AAPL position, then sell it and verify the trade appears."""
+    # First, establish a position to sell
+    buy_resp = api.post(
+        "/ibkr/order",
+        json={
+            "contract": {"symbol": "AAPL"},
+            "order": {"action": "BUY", "totalQuantity": 1, "orderType": "MKT"},
+        },
+    )
+    assert buy_resp.status_code == 200, buy_resp.text
+    _wait_for_trade(api, buy_resp.json()["permId"])
+
+    # Now sell
     order_resp = api.post(
         "/ibkr/order",
         json={

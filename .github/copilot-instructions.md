@@ -127,6 +127,7 @@ Caddy reads `VNC_DOMAIN` and `TRADE_DOMAIN` from env vars — the Caddyfile uses
   - **`with patch(...):`** inside the test — for single-test patches.
   - **`@patch(...)`** decorator — for single-test or single-class patches.
   - Never use bare `_patcher.start()` without registering a `.stop()`.
+- **No cross-test dependencies.** Every test must be self-contained — it must not rely on state created by a previous test (e.g. a position opened by an earlier buy test). Pytest does not guarantee execution order, and tests may run selectively or in parallel. If a test needs preconditions, create them within the test itself or via an explicit fixture.
 
 ## Remote Client Structure
 

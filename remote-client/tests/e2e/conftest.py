@@ -14,7 +14,7 @@ def _preflight_check() -> None:
     """Fail fast if webhook-relay is unreachable or disconnected from IB Gateway."""
     try:
         resp = httpx.get(f"{BASE_URL}/health", timeout=5.0)
-    except httpx.ConnectError:
+    except httpx.HTTPError:
         pytest.exit(
             "webhook-relay is not reachable at "
             f"{BASE_URL}. Is the E2E stack running? (make e2e-up)",
