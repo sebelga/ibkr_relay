@@ -29,7 +29,7 @@
   4. `make e2e-down` — tear down **only after all tests pass**. Never tear down between iterations.
 - When modifying any Python file (`.py`), always run `make test`, `make typecheck`, and `make lint` and confirm all pass before deploying.
 - **Every Python file must be covered by `make typecheck`.** When adding a new Python service, package, or standalone script, immediately add it to the mypy invocation in the Makefile. No Python file may exist outside mypy's scope.
-- After modifying any model in `poller/models_poller.py` or `remote-client/models_remote_client.py`, also run `make types` to regenerate the TypeScript definitions.
+- After modifying any model in `services/poller/models_poller.py` or `services/remote-client/models_remote_client.py`, also run `make types` to regenerate the TypeScript definitions.
 - **Always verify type safety by breaking it first.** After any refactor that touches types or model construction, deliberately introduce a type error (e.g. pass a `str` where `float` is expected), run `make typecheck`, and confirm it **fails**. Then revert and confirm it passes. Never assume mypy catches something — prove it.
 - **Avoid `dict[str, Any]` round-trips.** Never use `model_dump()` → `dict` → `Model(**data)` — mypy cannot type-check `**dict[str, Any]`. Use explicit keyword arguments or `model_copy(update=...)` instead.
 - **Prefer strict `Literal` types over bare `str` on Pydantic models.** Financial applications demand precision — a `str` field silently accepts typos and invalid values. When a field has a known set of valid values (e.g. `Action`, `OrderType`, `SecType`, `TimeInForce`), always use the existing `Literal` type. Only fall back to `str` when the external source (e.g. IB Gateway) genuinely returns unbounded values — and document why with an inline comment. At the mapping boundary (e.g. `_map_trade`), use `cast()` so mypy is satisfied and Pydantic validates at runtime.
@@ -56,20 +56,20 @@
 - **`.venv` is the project's virtual environment.** Created by `make setup` using Homebrew Python. All dev dependencies are installed there.
 - **Auto-activation** is configured in `~/.zshrc` via a `chpwd` hook — the venv activates automatically when `cd`'ing into the project directory.
 - **`make setup`** creates the `.venv` (if missing), installs all dependencies (`requirements-dev.txt` + both service requirements), and writes a `.pth` file (see below).
-- **`ibkr-relay.pth`** is created inside `.venv/lib/pythonX.Y/site-packages/` by `make setup`. It adds `poller/` and `remote-client/` to `sys.path` so that `from models_poller import ...` and `from models_remote_client import ...` work everywhere (CLI, tests, scripts) without `sys.path` hacks or `PYTHONPATH`.
+- **`ibkr-relay.pth`** is created inside `.venv/lib/pythonX.Y/site-packages/` by `make setup`. It adds `services/poller/` and `services/remote-client/` to `sys.path` so that `from models_poller import ...` and `from models_remote_client import ...` work everywhere (CLI, tests, scripts) without `sys.path` hacks or `PYTHONPATH`.
 - **`.venv/` is gitignored** — never commit it.
 
 ## Dependency Management
 
-- **Runtime deps (`poller/requirements.txt`, `remote-client/requirements.txt`)** use exact pins (`==`). These are deployed to production containers — builds must be reproducible.
+- **Runtime deps (`services/poller/requirements.txt`, `services/remote-client/requirements.txt`)** use exact pins (`==`). These are deployed to production containers — builds must be reproducible.
 - **Dev deps (`requirements-dev.txt`)** use major-version constraints (`>=X,<X+1`). This allows minor/patch updates while preventing breaking changes.
 - **When adding a new dependency**, always pin it immediately — never leave it unpinned. Use exact pin for runtime, major-version constraint for dev.
 
 ## Docker
 
 - **Never use `env_file:` in service definitions.** Always declare each env var explicitly in the `environment:` block with `${VAR}` interpolation. This is critical because `env_file:` is internally a list — override files append rather than replace, causing the production `.env` to leak into test containers. Explicit `environment:` vars with `--env-file` interpolation keeps environments fully isolated and allows clean overrides.
-- **`.dockerignore` uses an allowlist** (`*` to exclude everything, then `!poller/**` to include the whole module). Tests, `__pycache__`, and the Dockerfile itself are re-excluded. This means adding new source files to `poller/` requires **no** `.dockerignore` or Dockerfile changes.
-- The poller Dockerfile uses directory COPYs (`COPY poller/poller/ ./poller/`, `COPY poller/routes/ ./routes/`) so new files are picked up automatically.
+- **`.dockerignore` uses an allowlist** (`*` to exclude everything, then `!services/poller/**` to include the whole module). Tests, `__pycache__`, and the Dockerfile itself are re-excluded. This means adding new source files to `services/poller/` requires **no** `.dockerignore` or Dockerfile changes.
+- The poller Dockerfile uses directory COPYs (`COPY services/poller/poller/ ./poller/`, `COPY services/poller/routes/ ./routes/`) so new files are picked up automatically.
 
 ## Architecture
 
@@ -134,10 +134,10 @@ Caddy reads `VNC_DOMAIN` and `TRADE_DOMAIN` from env vars — the Caddyfile uses
 
 ## Remote Client Structure
 
-The `remote-client/` service is organized into packages:
+The `services/remote-client/` service is organized into packages:
 
 ```
-remote-client/
+services/remote-client/
   main.py                  # Entrypoint (connection + HTTP server)
   models_remote_client.py  # Pydantic request/response models (order API)
   client/                  # IB Gateway client (namespace delegation)
@@ -167,10 +167,10 @@ remote-client/
 
 ## Poller Structure
 
-The `poller/` service follows the same package pattern:
+The `services/poller/` service follows the same package pattern:
 
 ```
-poller/
+services/poller/
   main.py                  # Entrypoint (polling loop + HTTP API startup)
   models_poller.py         # Pydantic models: Fill, Trade, WebhookPayload, BuySell
   poller/                  # Core polling logic (package)
@@ -186,20 +186,20 @@ poller/
   requirements.txt
 ```
 
-- **`poller/poller/`** contains core logic: SQLite dedup, webhook delivery (HMAC-SHA256), Flex Web Service two-step fetch, and `poll_once()`.
-- **`poller/routes/`** contains the HTTP API for on-demand polls (`POST /ibkr/poller/run`).
-- **`poller/models_poller.py`** is the source of truth for TypeScript types (`make types`).
+- **`services/poller/poller/`** contains core logic: SQLite dedup, webhook delivery (HMAC-SHA256), Flex Web Service two-step fetch, and `poll_once()`.
+- **`services/poller/routes/`** contains the HTTP API for on-demand polls (`POST /ibkr/poller/run`).
+- **`services/poller/models_poller.py`** is the source of truth for TypeScript types (`make types`).
 
 ## Models (Two Separate Files)
 
 This project has **two independent model files** with unique names to avoid import ambiguity:
 
-| File                                    | Domain                      | Contains                                                                                      |
-| --------------------------------------- | --------------------------- | --------------------------------------------------------------------------------------------- |
-| `poller/models_poller.py`               | Webhook payloads (outbound) | `Fill`, `Trade`, `WebhookPayload`, `BuySell` — parsed from IBKR Flex XML                      |
-| `remote-client/models_remote_client.py` | Order API (inbound)         | `ContractPayload`, `OrderPayload`, `PlaceOrderPayload`, `PlaceOrderResponse` — REST API types |
+| File                                             | Domain                      | Contains                                                                                      |
+| ------------------------------------------------ | --------------------------- | --------------------------------------------------------------------------------------------- |
+| `services/poller/models_poller.py`               | Webhook payloads (outbound) | `Fill`, `Trade`, `WebhookPayload`, `BuySell` — parsed from IBKR Flex XML                      |
+| `services/remote-client/models_remote_client.py` | Order API (inbound)         | `ContractPayload`, `OrderPayload`, `PlaceOrderPayload`, `PlaceOrderResponse` — REST API types |
 
-- **Unique filenames** (`models_poller.py`, `models_remote_client.py`) prevent import collisions when both `poller/` and `remote-client/` are on `sys.path` (via the `.pth` file). Use `from models_poller import ...` and `from models_remote_client import ...` everywhere.
+- **Unique filenames** (`models_poller.py`, `models_remote_client.py`) prevent import collisions when both `services/poller/` and `services/remote-client/` are on `sys.path` (via the `.pth` file). Use `from models_poller import ...` and `from models_remote_client import ...` everywhere.
 - `models_poller.py` is the source of truth for `IbkrPoller` TypeScript types (`make types`).
 - `models_remote_client.py` is the source of truth for `IbkrHttp` TypeScript types (`make types`).
 - `models_remote_client.py` uses strict `Literal` types (`Action`, `OrderType`, `SecType`, `TimeInForce`) aligned with `ib_async` field names.
@@ -254,8 +254,8 @@ The `POST /ibkr/order` endpoint accepts a nested payload mirroring `ib.placeOrde
 - Types are published as `@tradegist/ibkr-types` (npm package in `types/`, not yet published).
 - **Two namespaces**: `IbkrPoller` (webhook payload types) and `IbkrHttp` (order API types).
 - **`make types`** regenerates both from Pydantic models:
-  - `poller/models_poller.py` → `types/poller/webhook.d.ts`
-  - `remote-client/models_remote_client.py` → `types/http/order.d.ts`
+  - `services/poller/models_poller.py` → `types/poller/webhook.d.ts`
+  - `services/remote-client/models_remote_client.py` → `types/http/order.d.ts`
 - **Structure:**
   ```
   types/
@@ -336,12 +336,14 @@ cli/                    # Python CLI (operator scripts)
   sync.py               # Push .env + restart services
   order.py              # Place orders via HTTPS API
   poll.py               # Trigger immediate Flex poll
-caddy/Caddyfile         # Reverse proxy config (uses env vars for domains)
-remote-client/          # webhook-relay service (see Remote Client Structure above)
-poller/                 # Flex poller service (see Poller Structure above)
-  models_poller.py      # Pydantic models: Fill, Trade, WebhookPayload, BuySell
-gateway-controller/     # CGI sidecar (Alpine, busybox httpd)
-novnc/index.html        # Custom VNC UI (Tailwind CSS)
+services/               # Business-logic services (user-facing features)
+  remote-client/        # webhook-relay service (see Remote Client Structure above)
+  poller/               # Flex poller service (see Poller Structure above)
+    models_poller.py    # Pydantic models: Fill, Trade, WebhookPayload, BuySell
+infra/                  # Infrastructure backbone (no business logic)
+  caddy/Caddyfile       # Reverse proxy config (uses env vars for domains)
+  gateway-controller/   # CGI sidecar (Alpine, busybox httpd)
+  novnc/index.html      # Custom VNC UI (Tailwind CSS)
 types/                  # @tradegist/ibkr-types npm package (IbkrPoller + IbkrHttp namespaces)
 docker-compose.test.yml # E2E test stack
 terraform/              # Infrastructure as code (DigitalOcean)

@@ -273,11 +273,11 @@ types/
   package.json               # @tradegist/ibkr-types
   poller/
     index.d.ts               # Re-exports: BuySell, WebhookPayload, Trade
-    types.d.ts               # Generated from poller/models_poller.py
+    types.d.ts               # Generated from services/poller/models_poller.py
     types.schema.json         # Intermediate JSON Schema
   http/
     index.d.ts               # Re-exports: PlaceOrderPayload, ContractPayload, OrderPayload, PlaceOrderResponse
-    types.d.ts               # Generated from remote-client/models_remote_client.py
+    types.d.ts               # Generated from services/remote-client/models_remote_client.py
     types.schema.json         # Intermediate JSON Schema
 ```
 
@@ -378,7 +378,7 @@ When orders fill, the relay POSTs a JSON payload with all trades batched into a 
 
 The `trades` array contains one `Trade` object per order (fills are aggregated by `orderId`). The `errors` array contains warnings about unknown XML attributes or parse errors — it is empty when everything parsed cleanly. See [Flex XML Parsing](#flex-xml-parsing) for details.
 
-Each `Trade` includes **all fields** from the IBKR Flex XML (see [`poller/models_poller.py`](poller/models_poller.py) for the full list). Most fields not present in the XML default to `""` or `0.0`, but `buySell` must be present; rows missing it are skipped and reported in `errors`.
+Each `Trade` includes **all fields** from the IBKR Flex XML (see [`services/poller/models_poller.py`](services/poller/models_poller.py) for the full list). Most fields not present in the XML default to `""` or `0.0`, but `buySell` must be present; rows missing it are skipped and reported in `errors`.
 
 The payload is signed with HMAC-SHA256. Verify using the `X-Signature-256` header:
 
@@ -545,55 +545,57 @@ make sync LOCAL_FILES=1  # deploy to your droplet
 │ ├── cloud-init.sh # Docker install + repo clone (no secrets)
 │ └── env.tftpl # .env template for file provisioner
 ├── docker-compose.yml # Container orchestration (6 services)
-├── caddy/
-│ └── Caddyfile # Reverse proxy config (VNC + Trade domains)
-├── novnc/
-│ └── index.html # VNC web client (Start Gateway button)
-├── gateway-controller/
-│ ├── Dockerfile
-│ ├── start-gateway.sh # CGI script to start ib-gateway
-│ └── gateway-status.sh # CGI script to check ib-gateway status
-├── remote-client/
-│ ├── Dockerfile
-│   ├── requirements.txt       # ib_async, aiohttp
-│   ├── main.py                # Entrypoint (connection + HTTP server)
-│   ├── models_remote_client.py # Pydantic models (order API types)
-│   ├── client/                # IB Gateway client (namespace delegation)
-│   │   ├── __init__.py        # IBClient class (connection management)
-│   │   └── orders.py          # OrdersNamespace (place orders)
-│   ├── routes/                # HTTP route handlers
-│   │   ├── __init__.py        # Route orchestrator (create_routes)
-│   │   ├── middlewares.py     # Auth middleware (Bearer token)
-│   │   ├── order_place.py     # POST /ibkr/order
-│   │   └── health.py          # GET /health
-│   └── tests/e2e/             # E2E tests (paper account)
-│       ├── conftest.py        # httpx fixtures
-│       ├── .env.test.example  # Template for paper credentials
-│       └── .env.test          # Your paper credentials (gitignored)
-├── poller/
-│   ├── Dockerfile
-│   ├── requirements.txt       # httpx, pydantic, aiohttp
-│   ├── main.py                # Entrypoint (polling loop + HTTP API)
-│   ├── models_poller.py       # Pydantic models (Fill, Trade, WebhookPayload, BuySell)
-│   ├── poller/                # Core polling logic (package)
-│   │   ├── __init__.py        # SQLite dedup, webhook delivery, Flex fetch, poll_once()
-│   │   ├── flex_parser.py     # Flex XML parser (Activity + Trade Confirmation)
-│   │   ├── test_flex_parser.py # Tests for flex_parser
-│   │   └── test_poller.py     # Tests for poller core logic
-│   └── routes/                # HTTP API
-│       ├── __init__.py        # Route orchestrator (create_routes, start_api_server)
-│       ├── middlewares.py     # Auth middleware (Bearer token)
-│       └── run.py             # POST /ibkr/poller/run handler
+├── services/                  # Business-logic services (user-facing features)
+│   ├── remote-client/
+│   │   ├── Dockerfile
+│   │   ├── requirements.txt       # ib_async, aiohttp
+│   │   ├── main.py                # Entrypoint (connection + HTTP server)
+│   │   ├── models_remote_client.py # Pydantic models (order API types)
+│   │   ├── client/                # IB Gateway client (namespace delegation)
+│   │   │   ├── __init__.py        # IBClient class (connection management)
+│   │   │   └── orders.py          # OrdersNamespace (place orders)
+│   │   ├── routes/                # HTTP route handlers
+│   │   │   ├── __init__.py        # Route orchestrator (create_routes)
+│   │   │   ├── middlewares.py     # Auth middleware (Bearer token)
+│   │   │   ├── order_place.py     # POST /ibkr/order
+│   │   │   └── health.py          # GET /health
+│   │   └── tests/e2e/             # E2E tests (paper account)
+│   │       ├── conftest.py        # httpx fixtures
+│   │       ├── .env.test.example  # Template for paper credentials
+│   │       └── .env.test          # Your paper credentials (gitignored)
+│   └── poller/
+│       ├── Dockerfile
+│       ├── requirements.txt       # httpx, pydantic, aiohttp
+│       ├── main.py                # Entrypoint (polling loop + HTTP API)
+│       ├── models_poller.py       # Pydantic models (Fill, Trade, WebhookPayload, BuySell)
+│       ├── poller/                # Core polling logic (package)
+│       │   ├── __init__.py        # SQLite dedup, webhook delivery, Flex fetch, poll_once()
+│       │   ├── flex_parser.py     # Flex XML parser (Activity + Trade Confirmation)
+│       │   ├── test_flex_parser.py # Tests for flex_parser
+│       │   └── test_poller.py     # Tests for poller core logic
+│       └── routes/                # HTTP API
+│           ├── __init__.py        # Route orchestrator (create_routes, start_api_server)
+│           ├── middlewares.py     # Auth middleware (Bearer token)
+│           └── run.py             # POST /ibkr/poller/run handler
+├── infra/                         # Infrastructure backbone (no business logic)
+│   ├── caddy/
+│   │   └── Caddyfile              # Reverse proxy config (VNC + Trade domains)
+│   ├── novnc/
+│   │   └── index.html             # VNC web client (Start Gateway button)
+│   └── gateway-controller/
+│       ├── Dockerfile
+│       ├── start-gateway.sh       # CGI script to start ib-gateway
+│       └── gateway-status.sh      # CGI script to check ib-gateway status
 ├── docker-compose.test.yml    # E2E test stack (ib-gateway + webhook-relay)
 └── types/                     # @tradegist/ibkr-types npm package
     ├── index.d.ts             # Barrel: exports IbkrPoller, IbkrHttp namespaces
     ├── package.json
     ├── poller/                # IbkrPoller namespace
     │   ├── index.d.ts
-    │   └── types.d.ts         # Generated from poller/models_poller.py
+    │   └── types.d.ts         # Generated from services/poller/models_poller.py
     └── http/                  # IbkrHttp namespace
         ├── index.d.ts
-        └── types.d.ts         # Generated from remote-client/models_remote_client.py
+        └── types.d.ts         # Generated from services/remote-client/models_remote_client.py
 
 ```
 
@@ -707,7 +709,7 @@ Example response:
 }
 ```
 
-Field names mirror `ib_async` exactly (e.g. `lmtPrice`, `totalQuantity`, `secType`, `tif`, `outsideRth`). See [`remote-client/models_remote_client.py`](remote-client/models_remote_client.py) for the full schema.
+Field names mirror `ib_async` exactly (e.g. `lmtPrice`, `totalQuantity`, `secType`, `tif`, `outsideRth`). See [`services/remote-client/models_remote_client.py`](services/remote-client/models_remote_client.py) for the full schema.
 
 > **Note**: The gateway must have `READ_ONLY_API=no` for orders to be accepted.
 
@@ -847,7 +849,7 @@ The poller supports both **Activity Flex Queries** (`<Trade>` tags) and **Trade 
   | `settleDateTarget`   | `settleDateTarget`      | `settleDate`                 |
   | `tradeMoney`         | `tradeMoney`            | `amount`                     |
 
-- **All known fields are forwarded as-is** from the XML. The full list of supported fields is defined in [`poller/models_poller.py`](poller/models_poller.py). Unknown XML attributes are silently dropped but reported in the `errors` array of the webhook payload.
+- **All known fields are forwarded as-is** from the XML. The full list of supported fields is defined in [`services/poller/models_poller.py`](services/poller/models_poller.py). Unknown XML attributes are silently dropped but reported in the `errors` array of the webhook payload.
 
 - **Fills are aggregated into trades** by `orderId`. When an order has multiple fills:
   - `quantity` is the sum of all fills
@@ -862,6 +864,6 @@ The poller supports both **Activity Flex Queries** (`<Trade>` tags) and **Trade 
 
 - **Parse errors never break the runtime.** Malformed rows are skipped and reported in the `errors` array. Bad float values default to `0.0`.
 
-The XML parsing logic lives in [`poller/flex_parser.py`](poller/flex_parser.py).
+The XML parsing logic lives in [`services/poller/poller/flex_parser.py`](services/poller/poller/flex_parser.py).
 
 If you notice any mistakes in the webhook payload or field mapping, please [open a PR](../../pulls).

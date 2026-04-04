@@ -32,7 +32,7 @@ services:
     expose:
       - "8080"
     volumes:
-      - ./novnc/index.html:/usr/share/novnc/index.html:ro
+      - ./infra/novnc/index.html:/usr/share/novnc/index.html:ro
     entrypoint:
       ["websockify", "--web", "/usr/share/novnc", "8080", "ib-gateway:5900"]
 
@@ -48,12 +48,12 @@ services:
       VNC_DOMAIN: ${VNC_DOMAIN:?Set VNC_DOMAIN in .env}
       TRADE_DOMAIN: ${TRADE_DOMAIN:?Set TRADE_DOMAIN in .env}
     volumes:
-      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
       - caddy-config:/config
 
   webhook-relay:
-    build: ./remote-client
+    build: ./services/remote-client
     restart: always
     depends_on:
       - ib-gateway
@@ -69,7 +69,7 @@ services:
   poller:
     build:
       context: .
-      dockerfile: poller/Dockerfile
+      dockerfile: services/poller/Dockerfile
     restart: always
     environment:
       IBKR_FLEX_TOKEN: ${IBKR_FLEX_TOKEN:?Set IBKR_FLEX_TOKEN in .env}
@@ -88,7 +88,7 @@ services:
   poller-2:
     build:
       context: .
-      dockerfile: poller/Dockerfile
+      dockerfile: services/poller/Dockerfile
     restart: always
     profiles: ["poller2"]
     environment:
@@ -107,7 +107,7 @@ services:
       - poller-2-data:/data
 
   gateway-controller:
-    build: ./gateway-controller
+    build: ./infra/gateway-controller
     restart: always
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock

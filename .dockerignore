@@ -2,8 +2,8 @@
 
 *
 
-!poller/**
-poller/tests/
-poller/Dockerfile
-poller/**/test_*.py
-poller/**/__pycache__/
+!services/poller/**
+services/poller/tests/
+services/poller/Dockerfile
+services/poller/**/test_*.py
+services/poller/**/__pycache__/

@@ -13,7 +13,7 @@ services:
     ports:
       - "15010:5000"
     volumes:
-      - ./remote-client:/app
+      - ./services/remote-client:/app
     healthcheck:
       test:
         [
@@ -37,7 +37,7 @@ services:
     ports:
       - "15011:8000"
     volumes:
-      - ./poller:/app
+      - ./services/poller:/app
     healthcheck:
       test:
         [

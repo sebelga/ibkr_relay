@@ -21,14 +21,14 @@ disallow_untyped_defs = false
 disallow_untyped_calls = false
 
 [tool.pytest.ini_options]
-testpaths = ["poller", "remote-client"]
+testpaths = ["services/poller", "services/remote-client"]
 norecursedirs = ["tests/e2e"]
 addopts = "--import-mode=importlib"
 
 [tool.ruff]
 target-version = "py311"
 line-length = 100
-src = ["poller", "remote-client", "cli"]
+src = ["services/poller", "services/remote-client", "cli"]
 
 [tool.ruff.lint]
 select = [
@@ -49,7 +49,7 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 # Route tests must patch API_TOKEN before importing routes
-"remote-client/routes/test_*.py" = ["E402"]
+"services/remote-client/routes/test_*.py" = ["E402"]
 # CLI scripts use conditional imports and have looser style
 "cli/*.py" = ["E402", "F401", "RUF005"]
 

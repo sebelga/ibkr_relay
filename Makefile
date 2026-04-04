@@ -11,9 +11,9 @@ help: ## Show available commands
 
 setup: ## Create .venv and install all dependencies
 	@test -d .venv || python3 -m venv .venv
-	.venv/bin/pip install -r requirements-dev.txt -r poller/requirements.txt -r remote-client/requirements.txt
-	@echo "$(CURDIR)/poller" > $$(find .venv/lib -name site-packages -type d)/ibkr-relay.pth
-	@echo "$(CURDIR)/remote-client" >> $$(find .venv/lib -name site-packages -type d)/ibkr-relay.pth
+	.venv/bin/pip install -r requirements-dev.txt -r services/poller/requirements.txt -r services/remote-client/requirements.txt
+	@echo "$(CURDIR)/services/poller" > $$(find .venv/lib -name site-packages -type d)/ibkr-relay.pth
+	@echo "$(CURDIR)/services/remote-client" >> $$(find .venv/lib -name site-packages -type d)/ibkr-relay.pth
 
 deploy: ## Deploy infrastructure (Terraform + Docker)
 	$(PYTHON) -m cli deploy
@@ -43,22 +43,22 @@ test-webhook: ## Send sample trades to webhook endpoint (make test-webhook [S=2]
 	$(CLI_RELAY_ENV) $(PYTHON) -m cli test-webhook $(S)
 
 types: ## Regenerate TypeScript types from Pydantic models
-	PYTHONPATH=poller:remote-client $(PYTHON) schema_gen.py models_poller > types/poller/types.schema.json
+	PYTHONPATH=services/poller:services/remote-client $(PYTHON) schema_gen.py models_poller > types/poller/types.schema.json
 	npx --yes json-schema-to-typescript types/poller/types.schema.json > types/poller/types.d.ts
-	PYTHONPATH=poller:remote-client $(PYTHON) schema_gen.py models_remote_client > types/http/types.schema.json
+	PYTHONPATH=services/poller:services/remote-client $(PYTHON) schema_gen.py models_remote_client > types/http/types.schema.json
 	npx --yes json-schema-to-typescript types/http/types.schema.json > types/http/types.d.ts
 	@echo "Generated types/poller/types.d.ts + types/http/types.d.ts"
 
 test: ## Run unit tests
-	PYTHONPATH=.:poller:remote-client $(PYTHON) -m pytest -v
+	PYTHONPATH=.:services/poller:services/remote-client $(PYTHON) -m pytest -v
 
 typecheck: ## Run mypy strict type checking
-	MYPYPATH=poller $(PYTHON) -m mypy poller/ cli/test_webhook.py
-	MYPYPATH=remote-client $(PYTHON) -m mypy remote-client/
+	MYPYPATH=services/poller $(PYTHON) -m mypy services/poller/ cli/test_webhook.py
+	MYPYPATH=services/remote-client $(PYTHON) -m mypy services/remote-client/
 	$(PYTHON) -m mypy schema_gen.py
 
 lint: ## Run ruff linter (use FIX=1 to auto-fix)
-	$(PYTHON) -m ruff check poller/ remote-client/ cli/ schema_gen.py $(if $(FIX),--fix)
+	$(PYTHON) -m ruff check services/poller/ services/remote-client/ cli/ schema_gen.py $(if $(FIX),--fix)
 
 local-up: ## Start full stack locally (no TLS, direct port access)
 	$(LOCAL_COMPOSE) up -d --build
@@ -114,7 +114,7 @@ e2e-down: ## Stop and remove E2E test stack
 
 e2e-run: ## Run E2E tests (stack must be up)
 	@$(E2E_COMPOSE) restart webhook-relay poller > /dev/null 2>&1 && sleep 3
-	$(PYTHON) -m pytest remote-client/tests/e2e/ poller/tests/e2e/ -v
+	$(PYTHON) -m pytest services/remote-client/tests/e2e/ services/poller/tests/e2e/ -v
 
 e2e: ## Run E2E tests against local paper account (starts/stops stack)
 	@was_up=false; \
