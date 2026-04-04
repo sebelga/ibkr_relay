@@ -6,7 +6,7 @@ from aiohttp import web
 from pydantic import ValidationError
 
 from client import IBClient
-from models import PlaceOrderRequest
+from models_remote_client import PlaceOrderRequest
 
 log = logging.getLogger("routes")
 

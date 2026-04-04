@@ -3,7 +3,7 @@
 import pytest
 
 from poller.flex_parser import _dedup_id, aggregate_fills, parse_fills
-from models import BuySell, Fill, Trade
+from models_poller import BuySell, Fill, Trade
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────

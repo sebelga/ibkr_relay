@@ -55,20 +55,21 @@ def main():
         parser.print_help()
         sys.exit(1)
 
-    from cli import deploy, sync, pause, resume, destroy, poll, order, test_webhook
+    import importlib
 
-    commands = {
-        "deploy": deploy.run,
-        "destroy": destroy.run,
-        "pause": pause.run,
-        "resume": resume.run,
-        "sync": sync.run,
-        "poll": poll.run,
-        "order": order.run,
-        "test-webhook": test_webhook.run,
+    modules = {
+        "deploy": "cli.deploy",
+        "destroy": "cli.destroy",
+        "pause": "cli.pause",
+        "resume": "cli.resume",
+        "sync": "cli.sync",
+        "poll": "cli.poll",
+        "order": "cli.order",
+        "test-webhook": "cli.test_webhook",
     }
 
-    commands[args.command](args)
+    module = importlib.import_module(modules[args.command])
+    module.run(args)
 
 
 if __name__ == "__main__":

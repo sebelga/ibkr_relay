@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from models import Fill, Trade, WebhookPayload
+from models_poller import Fill, Trade, WebhookPayload
 from poller import (
     get_last_poll_ts,
     get_processed_ids,
