@@ -2,7 +2,6 @@
 
 import hashlib
 import hmac as hmac_mod
-import json
 import sqlite3
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -20,7 +19,6 @@ from poller import (
     send_webhook,
     set_last_poll_ts,
 )
-
 
 # ── Fixtures ─────────────────────────────────────────────────────────────
 
@@ -82,7 +80,6 @@ def _make_trade(**overrides: Any) -> Trade:
 
 class TestInitDb:
     def test_creates_tables(self) -> None:
-        conn = sqlite3.connect(":memory:")
         # Patch DB_PATH so init_db uses our in-memory connection pattern
         with patch("poller.DB_PATH", ":memory:"):
             db = init_db()

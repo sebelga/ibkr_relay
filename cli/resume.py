@@ -3,8 +3,15 @@ import subprocess
 import time
 
 from cli import (
-    load_env, env, validate_poller_env, do_api,
-    ssh_cmd, scp_file, droplet_size_for_heap, die, PROJECT_DIR,
+    PROJECT_DIR,
+    die,
+    do_api,
+    droplet_size_for_heap,
+    env,
+    load_env,
+    scp_file,
+    ssh_cmd,
+    validate_poller_env,
 )
 
 

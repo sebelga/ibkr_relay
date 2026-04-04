@@ -20,7 +20,7 @@ def generate_schema(models: list[type[BaseModel]]) -> None:
 
     defs: dict[str, object] = {}
     refs: list[dict[str, str]] = []
-    for model, s in zip(models, schemas):
+    for model, s in zip(models, schemas, strict=True):
         defs.update(s.get("$defs", {}))
         name = model.__name__
         defs[name] = {k: v for k, v in s.items() if k != "$defs"}

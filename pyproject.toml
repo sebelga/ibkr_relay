@@ -24,3 +24,36 @@ disallow_untyped_calls = false
 testpaths = ["poller", "remote-client"]
 norecursedirs = ["tests/e2e"]
 addopts = "--import-mode=importlib"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["poller", "remote-client", "cli"]
+
+[tool.ruff.lint]
+select = [
+    "F",      # Pyflakes (unused imports, undefined names, etc.)
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "I",      # isort (import ordering)
+    "UP",     # pyupgrade (modernize syntax for target Python)
+    "B",      # flake8-bugbear (common pitfalls)
+    "SIM",    # flake8-simplify
+    "RUF",    # Ruff-specific rules
+]
+ignore = [
+    "E501",   # line length — handled by formatter, not linter
+    "UP042",  # str+Enum → StrEnum — keep explicit inheritance for Pydantic model clarity
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Route tests must patch API_TOKEN before importing routes
+"remote-client/routes/test_*.py" = ["E402"]
+# CLI scripts use conditional imports and have looser style
+"cli/*.py" = ["E402", "F401", "RUF005"]
+
+[tool.ruff.lint.isort]
+known-first-party = [
+    "client", "routes", "poller",
+    "models_poller", "models_remote_client",
+]

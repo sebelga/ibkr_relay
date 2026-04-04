@@ -1,15 +1,11 @@
 """Unit tests for routes/order_place.py — request validation and error paths."""
 
-import json
-import os
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
-import pytest
 from aiohttp import web
-from aiohttp.test_utils import AioHTTPTestCase, TestClient, unittest_run_loop
+from aiohttp.test_utils import AioHTTPTestCase, unittest_run_loop
 
 from routes import create_routes
-
 
 # Patch API_TOKEN at module level in middlewares so auth passes with "test-token".
 _patch_token = patch("routes.middlewares.API_TOKEN", "test-token")

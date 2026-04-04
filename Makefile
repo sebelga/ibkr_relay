@@ -1,4 +1,4 @@
-.PHONY: setup deploy destroy pause resume sync order poll poll2 test-webhook types test typecheck e2e e2e-up e2e-run e2e-down local-up local-down logs stats gateway ssh help
+.PHONY: setup deploy destroy pause resume sync order poll poll2 test-webhook types test typecheck lint e2e e2e-up e2e-run e2e-down local-up local-down logs stats gateway ssh help
 
 PYTHON ?= .venv/bin/python3
 E2E_ENV = .env.test
@@ -56,6 +56,9 @@ typecheck: ## Run mypy strict type checking
 	MYPYPATH=poller $(PYTHON) -m mypy poller/ cli/test_webhook.py
 	MYPYPATH=remote-client $(PYTHON) -m mypy remote-client/
 	$(PYTHON) -m mypy schema_gen.py
+
+lint: ## Run ruff linter (use FIX=1 to auto-fix)
+	$(PYTHON) -m ruff check poller/ remote-client/ cli/ schema_gen.py $(if $(FIX),--fix)
 
 local-up: ## Start full stack locally (no TLS, direct port access)
 	$(LOCAL_COMPOSE) up -d --build

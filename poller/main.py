@@ -5,8 +5,15 @@ import logging
 import sqlite3
 import sys
 
-from poller import FLEX_TOKEN, FLEX_QUERY_ID, POLL_INTERVAL, TARGET_WEBHOOK_URL
-from poller import init_db, poll_once, prune_old
+from poller import (
+    FLEX_QUERY_ID,
+    FLEX_TOKEN,
+    POLL_INTERVAL,
+    TARGET_WEBHOOK_URL,
+    init_db,
+    poll_once,
+    prune_old,
+)
 from routes import start_api_server
 
 logging.basicConfig(

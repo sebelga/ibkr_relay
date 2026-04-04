@@ -1,8 +1,9 @@
 """E2E test fixtures — httpx client pointed at the local test stack."""
 
+from collections.abc import Iterator
+
 import httpx
 import pytest
-from collections.abc import Iterator
 
 BASE_URL = "http://localhost:15010"
 API_TOKEN = "test-token"

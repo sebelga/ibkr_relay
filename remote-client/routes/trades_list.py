@@ -3,6 +3,8 @@
 from aiohttp import web
 
 from client import IBClient
+
+
 async def handle_list_trades(request: web.Request) -> web.Response:
     client: IBClient = request.app["client"]
 

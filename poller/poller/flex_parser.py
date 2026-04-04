@@ -146,7 +146,7 @@ def aggregate_fills(fills: list[Fill]) -> list[Trade]:
         groups.setdefault(fill.orderId, []).append(fill)
 
     trades: list[Trade] = []
-    for order_id, order_fills in groups.items():
+    for _order_id, order_fills in groups.items():
         # Weighted average price
         abs_total = sum(abs(f.quantity) for f in order_fills)
         avg_price = (

@@ -1,6 +1,6 @@
 import json
 
-from cli import load_env, relay_api, die
+from cli import die, load_env, relay_api
 
 
 def run(args: object) -> None:

@@ -2,7 +2,7 @@
 
 from aiohttp import web
 
-from client import IBClient, TRADING_MODE
+from client import TRADING_MODE, IBClient
 from models_remote_client import HealthResponse
 
 

@@ -11,7 +11,8 @@ import xml.etree.ElementTree as ET
 import httpx
 
 from models_poller import Trade, WebhookPayload
-from .flex_parser import parse_fills, aggregate_fills, _dedup_id
+
+from .flex_parser import _dedup_id, aggregate_fills, parse_fills
 
 log = logging.getLogger("poller")
 

@@ -2,8 +2,14 @@ import shutil
 import subprocess
 
 from cli import (
-    load_env, env, validate_poller_env,
-    ssh_cmd, scp_file, ssh_key_path, die, PROJECT_DIR,
+    PROJECT_DIR,
+    die,
+    env,
+    load_env,
+    scp_file,
+    ssh_cmd,
+    ssh_key_path,
+    validate_poller_env,
 )
 
 SERVICE_MAP = {

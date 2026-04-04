@@ -1,7 +1,7 @@
 import os
 import shutil
 
-from cli import load_env, env, die, terraform
+from cli import die, env, load_env, terraform
 
 
 def run(args):

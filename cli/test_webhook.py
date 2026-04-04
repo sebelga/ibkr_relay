@@ -2,12 +2,11 @@
 
 import hashlib
 import hmac
-import urllib.request
 import urllib.error
+import urllib.request
 
-from cli import load_env, env, die
+from cli import die, env, load_env
 from models_poller import BuySell, Trade, WebhookPayload
-
 
 SAMPLE_TRADES = [
     Trade(

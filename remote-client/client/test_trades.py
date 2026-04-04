@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 from client.trades import TradesNamespace, _lmt_price, _map_fill, _map_trade
 
-
 # ── _lmt_price sentinel handling ─────────────────────────────────────
 
 

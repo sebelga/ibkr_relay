@@ -2,9 +2,8 @@
 
 import pytest
 
-from poller.flex_parser import _dedup_id, aggregate_fills, parse_fills
 from models_poller import BuySell, Fill, Trade
-
+from poller.flex_parser import _dedup_id, aggregate_fills, parse_fills
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -129,14 +128,14 @@ class TestParseFillsBasic:
 
     def test_activity_flex_basic(self) -> None:
         xml = _wrap_af(AF_AAPL, AF_GOOG)
-        fills, errors = parse_fills(xml)
+        fills, _errors = parse_fills(xml)
         assert len(fills) == 2
         assert fills[0].symbol == "AAPL"
         assert fills[1].symbol == "GOOG"
 
     def test_trade_confirmation_basic(self) -> None:
         xml = _wrap_tc(TC_AAPL, TC_GOOG)
-        fills, errors = parse_fills(xml)
+        fills, _errors = parse_fills(xml)
         assert len(fills) == 2
         assert fills[0].symbol == "AAPL"
         assert fills[1].symbol == "GOOG"
@@ -315,7 +314,7 @@ class TestFloatParsing:
         xml = _wrap_af(
             '<Trade transactionID="1" buySell="BUY" quantity="42.5" tradePrice="100.25" />'
         )
-        fills, errors = parse_fills(xml)
+        fills, _errors = parse_fills(xml)
         assert fills[0].quantity == pytest.approx(42.5)
         assert fills[0].price == pytest.approx(100.25)
 
@@ -344,7 +343,7 @@ class TestFloatParsing:
 
     def test_bad_float_includes_value_in_error(self) -> None:
         xml = _wrap_af('<Trade transactionID="1" buySell="BUY" tradePrice="N/A" />')
-        fills, errors = parse_fills(xml)
+        _fills, errors = parse_fills(xml)
         assert any("N/A" in e for e in errors)
 
     def test_string_field_not_parsed_as_float(self) -> None:
@@ -463,7 +462,7 @@ class TestUnknownAttributes:
             '<Trade transactionID="1" buySell="BUY" fakeField="a" />',
             '<Trade transactionID="2" buySell="BUY" fakeField="b" />',
         )
-        fills, errors = parse_fills(xml)
+        _fills, errors = parse_fills(xml)
         count = sum(1 for e in errors if "fakeField" in e)
         assert count == 1
 
@@ -472,7 +471,7 @@ class TestUnknownAttributes:
         xml = _wrap_tc(
             '<TradeConfirm tradeID="1" buySell="BUY" blockID="99" code="P" salesTax="0" />'
         )
-        fills, errors = parse_fills(xml)
+        _fills, errors = parse_fills(xml)
         unknown_line = next(e for e in errors if "Unknown XML" in e)
         assert "blockID" in unknown_line
         assert "code" in unknown_line
@@ -504,7 +503,7 @@ class TestMalformedRows:
             '<Trade transactionID="1" buySell="BUY" quantity="abc" />',
             '<Trade transactionID="2" buySell="BUY" quantity="10" />',
         )
-        fills, errors = parse_fills(xml)
+        fills, _errors = parse_fills(xml)
         assert len(fills) == 2
         assert fills[0].quantity == 0.0
         assert fills[1].quantity == 10.0
@@ -776,7 +775,7 @@ class TestFullPipeline:
 
     def test_af_two_symbols(self) -> None:
         xml = _wrap_af(AF_AAPL, AF_GOOG)
-        fills, errors = parse_fills(xml)
+        fills, _errors = parse_fills(xml)
         trades = aggregate_fills(fills)
         assert len(trades) == 2
         for t in trades:
@@ -785,7 +784,7 @@ class TestFullPipeline:
 
     def test_tc_two_symbols(self) -> None:
         xml = _wrap_tc(TC_AAPL, TC_GOOG)
-        fills, errors = parse_fills(xml)
+        fills, _errors = parse_fills(xml)
         trades = aggregate_fills(fills)
         assert len(trades) == 2
 

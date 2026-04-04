@@ -29,7 +29,7 @@ async def handle_run_poll(request: web.Request) -> web.Response:
 
     try:
         await asyncio.wait_for(poll_lock.acquire(), timeout=0)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return web.json_response({"error": "Poll already in progress"}, status=409)
 
     try:

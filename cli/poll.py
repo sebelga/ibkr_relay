@@ -1,6 +1,6 @@
 import json
 
-from cli import load_env, validate_poller_env, relay_api, env, ssh_cmd, die
+from cli import die, env, load_env, relay_api, ssh_cmd, validate_poller_env
 
 
 def run(args):

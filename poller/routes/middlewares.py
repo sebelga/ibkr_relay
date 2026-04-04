@@ -3,7 +3,7 @@
 import hmac
 import logging
 import os
-from collections.abc import Callable, Awaitable
+from collections.abc import Awaitable, Callable
 
 from aiohttp import web
 

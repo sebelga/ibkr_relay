@@ -3,6 +3,8 @@
 ## Code Quality (MANDATORY)
 
 - **Always apply best practices by default.** Do not ask the user whether to follow a best practice — just do it. Use idiomatic Python naming, file organization, and patterns. When there is a clearly better approach (naming, structure, error handling), use it directly and explain why.
+- **No unused imports.** After writing or editing any Python file, verify every `import` is actually used in the file. Remove any that are not. This applies to new files and edits to existing files alike.
+- **Run `make lint` after every code change.** Ruff enforces unused imports (F401), import ordering (I001), unused variables, common pitfalls (bugbear), and modern Python idioms. If ruff fails, fix before committing. Use `make lint FIX=1` to auto-fix safe issues (import sorting, etc.).
 
 ## Security Rules (MANDATORY)
 
@@ -25,7 +27,7 @@
   2. `make e2e-run` — run the tests.
   3. Fix code → `make e2e-run` → repeat until all tests pass. Volume mounts keep code in sync — no rebuild needed.
   4. `make e2e-down` — tear down **only after all tests pass**. Never tear down between iterations.
-- When modifying any Python file (`.py`), always run `make test` and `make typecheck` and confirm both pass before deploying.
+- When modifying any Python file (`.py`), always run `make test`, `make typecheck`, and `make lint` and confirm all pass before deploying.
 - **Every Python file must be covered by `make typecheck`.** When adding a new Python service, package, or standalone script, immediately add it to the mypy invocation in the Makefile. No Python file may exist outside mypy's scope.
 - After modifying any model in `poller/models_poller.py` or `remote-client/models_remote_client.py`, also run `make types` to regenerate the TypeScript definitions.
 - **Always verify type safety by breaking it first.** After any refactor that touches types or model construction, deliberately introduce a type error (e.g. pass a `str` where `float` is expected), run `make typecheck`, and confirm it **fails**. Then revert and confirm it passes. Never assume mypy catches something — prove it.
@@ -281,6 +283,7 @@ make resume    # Restore from snapshot
 make poll      # Trigger immediate Flex poll
 make order     # Place an order
 make e2e       # Run E2E tests (paper account)
+make lint      # Run ruff linter (FIX=1 to auto-fix)
 ```
 
 Direct CLI (no Make required, works on Windows):

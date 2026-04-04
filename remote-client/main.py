@@ -32,7 +32,9 @@ async def amain() -> None:
     client.ib.disconnectedEvent += client.on_disconnect
 
     # Start watchdog to detect stale connections
-    asyncio.ensure_future(client.watchdog())
+    watchdog_task = asyncio.ensure_future(client.watchdog())
+    client._background_tasks.add(watchdog_task)
+    watchdog_task.add_done_callback(client._background_tasks.discard)
 
     log.info("Remote client ready. Starting HTTP API on port %d ...", API_PORT)
 

@@ -2,8 +2,13 @@ import os
 import shutil
 
 from cli import (
-    load_env, require_env, env, compose_profiles,
-    terraform, die, PROJECT_DIR,
+    PROJECT_DIR,
+    compose_profiles,
+    die,
+    env,
+    load_env,
+    require_env,
+    terraform,
 )
 
 

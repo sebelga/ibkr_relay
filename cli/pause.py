@@ -1,7 +1,7 @@
 import time
 from datetime import datetime
 
-from cli import load_env, env, do_api, die, PROJECT_DIR
+from cli import PROJECT_DIR, die, do_api, env, load_env
 
 
 def run(args):
@@ -89,7 +89,7 @@ def run(args):
     print()
     print(f"  Snapshot: {snap_name} ({snapshot_id})")
     print(f"  Reserved IP: {reserved_ip} (kept, unassigned)")
-    print(f"  State saved to: .pause-state")
+    print("  State saved to: .pause-state")
     print()
     print("  Droplet billing has stopped.")
     print("  Snapshot cost: ~$0.06/GB/month")
