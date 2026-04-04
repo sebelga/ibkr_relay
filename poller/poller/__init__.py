@@ -228,7 +228,7 @@ def poll_once(
         # Always show a sample of the first aggregated trade for debugging
         all_trades = aggregate_fills(all_fills)
         if all_trades:
-            log.info("Sample trade (first):\n%s", all_trades[0].model_dump_json(indent=2))
+            log.debug("Sample trade (first):\n%s", all_trades[0].model_dump_json(indent=2))
 
         # Pre-filter by timestamp watermark to reduce dedup work
         last_ts = get_last_poll_ts(conn)
