@@ -9,7 +9,7 @@ For the fee/timestamp/option conventions that apply across all adapters, see [se
 - **`build_relay(notifiers)`** constructs a `BrokerRelay` with IBKR-specific `PollerConfig`s (Flex fetch + parse callbacks) and an optional `ListenerConfig` (ibkr_bridge WS with bearer token auth).
 - **Multi-account support** via `_2` suffixed env vars (e.g. `IBKR_FLEX_QUERY_ID_2`). Each suffix produces an additional `PollerConfig` within the same relay — no separate container. Triggered via `make poll RELAY=ibkr IDX=2` or `POST /relays/ibkr/poll/2`.
 - **Relay-specific overrides** — `IBKR_NOTIFIERS`, `IBKR_TARGET_WEBHOOK_URL` override the generic equivalents for the IBKR relay only.
-- **Listener connect callback** — closure adds bearer token auth headers and tracks `last_seq` for event resumption across reconnects.
+- **Listener connect callback** — closure adds bearer token auth headers and tracks `last_seq` for event resumption across reconnects. The seq is persisted to `/data/meta/relay.db` (via `get_last_bridge_seq` / `set_last_bridge_seq` in `poller_engine.py`) on every received message and read back on startup, so a relay restart resumes from the last delivered event instead of replaying the bridge's full buffer from seq=0 (which would cause duplicate webhooks).
 
 ## Flex fetch / dump separation
 
@@ -23,6 +23,7 @@ For `assetCategory == "OPT"` fills:
 - `Fill.symbol = contract.localSymbol.replace(" ", "")` — OCC ticker with spaces stripped (e.g. `"AVGO260620C00200000"`). IBKR pads the underlying to 6 characters with spaces in the raw OCC ticker — always strip so `Fill.symbol` is URL-friendly.
 - `Fill.option.rootSymbol = contract.symbol` — underlying (e.g. `"AVGO"`).
 - `strike`, `expiryDate` (via `flex_date_to_iso()`), and `type` (`"call"`/`"put"` from the `putCall` attribute) are required. Rows with missing or invalid option metadata are skipped with a parse error.
+- **`Fill.cost = price × volume × contract.multiplier`** (bridge path) — options are priced per share; each contract covers `multiplier` shares (standard = 100). `_map_fill` parses `WsContract.multiplier` as `int`; a non-integer or non-positive value raises `ValueError` and is surfaced as a webhook parse error. Equity fills use `multiplier = 1` so the formula is uniform. The Flex path is unaffected (IBKR pre-calculates `cost` in the XML).
 
 ## Fixture management
 
