@@ -29,6 +29,7 @@ from relay_core import (
     is_poller_enabled,
 )
 from relay_core.poller_engine import (
+    META_DB_PATH,
     get_last_bridge_seq,
     init_meta_db,
     set_last_bridge_seq,
@@ -443,10 +444,28 @@ def _on_message_factory(
     return handler
 
 
+def _persist_bridge_seq(db_path: str, seq: int) -> None:
+    """Write bridge last_seq using a fresh thread-local connection.
+
+    Called exclusively inside ``asyncio.to_thread`` so each invocation owns
+    its connection — no cross-thread sharing of sqlite3.Connection objects.
+    Persistence is best-effort: a transient write failure is logged as a
+    warning and the seq falls back to in-memory tracking for that message.
+    """
+    try:
+        conn = sqlite3.connect(db_path)
+        try:
+            set_last_bridge_seq(conn, "ibkr", seq)
+        finally:
+            conn.close()
+    except (OSError, sqlite3.Error) as exc:
+        log.warning("[ibkr] Failed to persist bridge seq=%d: %s — tracking in-memory only", seq, exc)
+
+
 def _build_connect(
     ws_url: str,
     api_token: str,
-    meta_conn: sqlite3.Connection | None = None,
+    meta_db_path: str | None = None,
 ) -> Callable[[aiohttp.ClientSession], Awaitable[aiohttp.ClientWebSocketResponse]]:
     """Build a connect callback that opens an authenticated WS connection.
 
@@ -455,7 +474,13 @@ def _build_connect(
     so the bridge resumes from where the relay left off instead of replaying
     its full event buffer from seq=0.
     """
-    initial = get_last_bridge_seq(meta_conn, "ibkr") if meta_conn is not None else 0
+    initial = 0
+    if meta_db_path is not None:
+        conn = sqlite3.connect(meta_db_path)
+        try:
+            initial = get_last_bridge_seq(conn, "ibkr")
+        finally:
+            conn.close()
     if initial > 0:
         log.info("[ibkr] Resuming bridge WS from persisted last_seq=%d", initial)
     state = {"last_seq": initial}
@@ -484,11 +509,12 @@ def _build_connect(
                     seq = data.get("seq")
                     if isinstance(seq, int) and seq != state["last_seq"]:
                         state["last_seq"] = seq
-                        if meta_conn is not None:
-                            # Persist off the event loop so the WS receive path
-                            # is not blocked by a SQLite write.
+                        if meta_db_path is not None:
+                            # Persist off the event loop — each to_thread call
+                            # opens its own connection so no connection is shared
+                            # across threads.
                             await asyncio.to_thread(
-                                set_last_bridge_seq, meta_conn, "ibkr", seq,
+                                _persist_bridge_seq, meta_db_path, seq,
                             )
                 except (ValueError, TypeError) as exc:
                     log.debug("[ibkr] Could not parse seq from WS message: %s", exc)
@@ -518,15 +544,17 @@ def _build_listener_config(tz: ZoneInfo) -> ListenerConfig | None:
     # Falls back gracefully when the meta-DB path is unavailable (e.g. in tests
     # or read-only environments) — persistence is an optimisation, not required
     # for correctness (dedup remains the primary guard).
-    _meta_conn: sqlite3.Connection | None = None
+    _meta_db_path: str | None = None
     try:
-        _meta_conn = init_meta_db()
+        conn = init_meta_db()
+        conn.close()
+        _meta_db_path = META_DB_PATH
     except (OSError, sqlite3.Error) as exc:
         log.warning("[ibkr] Bridge seq will not be persisted — meta DB unavailable: %s", exc)
 
     return ListenerConfig(
         connect=_build_connect(
-            _get_bridge_ws_url(), _get_bridge_api_token(), meta_conn=_meta_conn,
+            _get_bridge_ws_url(), _get_bridge_api_token(), meta_db_path=_meta_db_path,
         ),
         on_message=_on_message_factory(exec_events_enabled, tz),
         event_filter=_event_filter,

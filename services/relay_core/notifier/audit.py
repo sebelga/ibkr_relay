@@ -14,13 +14,13 @@ import functools
 import json
 import logging
 import logging.handlers
-import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel
 
+from relay_core.env import get_env
 from shared import Fill
 
 _module_log = logging.getLogger(__name__)
@@ -30,7 +30,7 @@ _BACKUP_COUNT = 7
 
 
 def _get_path() -> str:
-    return os.getenv("FILL_AUDIT_LOG_PATH", "").strip() or _DEFAULT_PATH
+    return get_env("FILL_AUDIT_LOG_PATH", default=_DEFAULT_PATH)
 
 
 @functools.cache
@@ -54,13 +54,19 @@ def _init() -> logging.Logger | None:
     logger.setLevel(logging.DEBUG)
 
     if not logger.handlers:
-        handler = logging.handlers.TimedRotatingFileHandler(
-            str(path),
-            when="midnight",
-            interval=1,
-            backupCount=_BACKUP_COUNT,
-            utc=True,
-        )
+        try:
+            handler = logging.handlers.TimedRotatingFileHandler(
+                str(path),
+                when="midnight",
+                interval=1,
+                backupCount=_BACKUP_COUNT,
+                utc=True,
+            )
+        except OSError as exc:
+            _module_log.warning(
+                "Fill audit log disabled — cannot open %s: %s", path, exc,
+            )
+            return None
         handler.setFormatter(logging.Formatter("%(message)s"))
         logger.addHandler(handler)
         _module_log.info("Fill audit log: %s (7-day rotation)", path)
