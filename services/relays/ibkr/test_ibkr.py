@@ -463,11 +463,12 @@ class TestOptionMapFill(unittest.TestCase):
     # ── cost / multiplier ────────────────────────────────────────────
 
     def test_option_cost_includes_multiplier(self) -> None:
-        # Options are priced per share; each contract covers multiplier shares.
-        # cost must be price * volume * multiplier, not price * volume.
-        # Default execution: price=150.25, shares=100.0; _option_contract multiplier="100".
-        fill = _map_fill(_envelope_with_contract(_option_contract()), _TEST_TZ)
-        self.assertAlmostEqual(fill.cost, 150.25 * 100.0 * 100)
+        # shares=2 (2 contracts) makes the 100x factor unambiguously from the
+        # contract multiplier, not a coincidence of shares==multiplier.
+        envelope = _envelope_with_contract(_option_contract())
+        envelope.fill.execution = envelope.fill.execution.model_copy(update={"shares": 2.0})
+        fill = _map_fill(envelope, _TEST_TZ)
+        self.assertAlmostEqual(fill.cost, 150.25 * 2.0 * 100)
 
     def test_equity_cost_excludes_multiplier(self) -> None:
         # Equity fills must not apply the option multiplier.

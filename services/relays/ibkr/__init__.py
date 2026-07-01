@@ -507,7 +507,7 @@ def _build_connect(
                 try:
                     data = json.loads(msg.data)
                     seq = data.get("seq")
-                    if isinstance(seq, int) and seq != state["last_seq"]:
+                    if isinstance(seq, int) and seq > state["last_seq"]:
                         state["last_seq"] = seq
                         if meta_db_path is not None:
                             # Persist off the event loop — each to_thread call
