@@ -22,6 +22,7 @@ from relay_core.dedup import init_db as _init_dedup_db
 from relay_core.env import get_env, get_env_int
 from relay_core.fx import enrich_if_enabled
 from relay_core.notifier import notify
+from relay_core.notifier.audit import log_fills
 from relay_core.notifier.models import WebhookPayloadTrades
 from shared import Fill, RelayName, Trade, aggregate_fills, to_epoch
 
@@ -336,6 +337,7 @@ def poll_once(
             return []
 
         # Aggregate only the NEW fills by order
+        log_fills(relay_name, new_fills)
         trades = aggregate_fills(new_fills)
         trades = enrich_if_enabled(trades, parse_errors)
         relay_log.info("Aggregated into %d trade(s)", len(trades))
