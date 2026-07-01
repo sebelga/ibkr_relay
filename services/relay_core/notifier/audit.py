@@ -4,8 +4,9 @@ Writes two event types:
   fills_received  — individual fills before dedup/aggregation (listener + poller)
   webhook_sent    — the aggregated WebhookPayloadTrades just before dispatch
 
-Enabled automatically when /data/logs/ is writable; silently disabled
-when the directory cannot be created (e.g. unit-test environments).
+Enabled automatically when /data/logs/ is writable; disabled with a
+warning when the directory or log file cannot be created (e.g. unit-test
+environments or read-only mounts).
 
 Override the log path via FILL_AUDIT_LOG_PATH env var.
 """

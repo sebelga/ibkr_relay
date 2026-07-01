@@ -476,11 +476,14 @@ def _build_connect(
     """
     initial = 0
     if meta_db_path is not None:
-        conn = sqlite3.connect(meta_db_path)
         try:
-            initial = get_last_bridge_seq(conn, "ibkr")
-        finally:
-            conn.close()
+            conn = sqlite3.connect(meta_db_path)
+            try:
+                initial = get_last_bridge_seq(conn, "ibkr")
+            finally:
+                conn.close()
+        except (OSError, sqlite3.Error) as exc:
+            log.warning("[ibkr] Could not read persisted bridge seq — starting from 0: %s", exc)
     if initial > 0:
         log.info("[ibkr] Resuming bridge WS from persisted last_seq=%d", initial)
     state = {"last_seq": initial}
