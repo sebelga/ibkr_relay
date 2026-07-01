@@ -28,6 +28,7 @@ from shared import Fill, RelayName, Trade, aggregate_fills, to_epoch
 log = logging.getLogger(__name__)
 
 WATERMARK_KEY_SUFFIX = "last_poll_ts"
+BRIDGE_SEQ_KEY_SUFFIX = "bridge_last_seq"
 
 
 # ── Poller configuration ─────────────────────────────────────────────
@@ -137,6 +138,32 @@ def set_last_poll_ts(
     meta_conn.execute(
         "INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)",
         (key, str(ts)),
+    )
+    meta_conn.commit()
+
+
+def get_last_bridge_seq(meta_conn: sqlite3.Connection, relay_name: str) -> int:
+    """Return the last delivered bridge WS sequence number, or 0 if unknown."""
+    key = f"{relay_name}:{BRIDGE_SEQ_KEY_SUFFIX}"
+    row = meta_conn.execute(
+        "SELECT value FROM metadata WHERE key = ?", (key,),
+    ).fetchone()
+    if not row:
+        return 0
+    try:
+        return int(row[0])
+    except (TypeError, ValueError):
+        return 0
+
+
+def set_last_bridge_seq(
+    meta_conn: sqlite3.Connection, relay_name: str, seq: int,
+) -> None:
+    """Persist the last delivered bridge WS sequence number."""
+    key = f"{relay_name}:{BRIDGE_SEQ_KEY_SUFFIX}"
+    meta_conn.execute(
+        "INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)",
+        (key, str(seq)),
     )
     meta_conn.commit()
 
