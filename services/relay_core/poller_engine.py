@@ -278,6 +278,9 @@ def poll_once(
             candidates = all_fills
             relay_log.info("No timestamp watermark — processing all %d fill(s)", len(candidates))
 
+        # Audit log before dedup so duplicates are visible in the log.
+        log_fills(relay_name, candidates)
+
         # Dedup remaining candidates against stored exec IDs (prefixed by relay name)
         candidate_ids = {f.execId for f in candidates}
         prefixed_candidates = _prefix_id_set(relay_name, candidate_ids)
@@ -337,7 +340,6 @@ def poll_once(
             return []
 
         # Aggregate only the NEW fills by order
-        log_fills(relay_name, new_fills)
         trades = aggregate_fills(new_fills)
         trades = enrich_if_enabled(trades, parse_errors)
         relay_log.info("Aggregated into %d trade(s)", len(trades))

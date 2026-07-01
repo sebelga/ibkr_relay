@@ -30,7 +30,7 @@ _BACKUP_COUNT = 7
 
 
 def _get_path() -> str:
-    return os.getenv("FILL_AUDIT_LOG_PATH") or _DEFAULT_PATH
+    return os.getenv("FILL_AUDIT_LOG_PATH", "").strip() or _DEFAULT_PATH
 
 
 @functools.cache

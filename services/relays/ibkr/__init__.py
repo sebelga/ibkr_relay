@@ -521,7 +521,7 @@ def _build_listener_config(tz: ZoneInfo) -> ListenerConfig | None:
     _meta_conn: sqlite3.Connection | None = None
     try:
         _meta_conn = init_meta_db()
-    except OSError as exc:
+    except (OSError, sqlite3.Error) as exc:
         log.warning("[ibkr] Bridge seq will not be persisted — meta DB unavailable: %s", exc)
 
     return ListenerConfig(
