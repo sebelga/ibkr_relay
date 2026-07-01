@@ -10,6 +10,7 @@ when the directory cannot be created (e.g. unit-test environments).
 Override the log path via FILL_AUDIT_LOG_PATH env var.
 """
 
+import functools
 import json
 import logging
 import logging.handlers
@@ -27,27 +28,18 @@ _module_log = logging.getLogger(__name__)
 _DEFAULT_PATH = "/data/logs/fills_audit.jsonl"
 _BACKUP_COUNT = 7
 
-# Lazy singleton — initialised on the first write attempt.
-_audit_logger: logging.Logger | None = None
-_init_done: bool = False
-
 
 def _get_path() -> str:
     return os.getenv("FILL_AUDIT_LOG_PATH") or _DEFAULT_PATH
 
 
+@functools.cache
 def _init() -> logging.Logger | None:
-    """Initialise (or return cached) the rotating audit logger.
+    """Initialise and return the rotating audit logger (called at most once).
 
-    Thread-safe in practice: the only write race is on first call, and
-    the ``if not logger.handlers`` guard prevents double-registration of
-    the file handler even if two threads race.
+    Returns None when the log directory cannot be created — audit logging
+    is disabled for the process lifetime in that case.
     """
-    global _audit_logger, _init_done
-    if _init_done:
-        return _audit_logger
-    _init_done = True
-
     path = Path(_get_path())
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -73,7 +65,6 @@ def _init() -> logging.Logger | None:
         logger.addHandler(handler)
         _module_log.info("Fill audit log: %s (7-day rotation)", path)
 
-    _audit_logger = logger
     return logger
 
 
