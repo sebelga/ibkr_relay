@@ -460,6 +460,34 @@ class TestOptionMapFill(unittest.TestCase):
                 _TEST_TZ,
             )
 
+    # ── cost / multiplier ────────────────────────────────────────────
+
+    def test_option_cost_includes_multiplier(self) -> None:
+        # Options are priced per share; each contract covers multiplier shares.
+        # cost must be price * volume * multiplier, not price * volume.
+        # Default execution: price=150.25, shares=100.0; _option_contract multiplier="100".
+        fill = _map_fill(_envelope_with_contract(_option_contract()), _TEST_TZ)
+        self.assertAlmostEqual(fill.cost, 150.25 * 100.0 * 100)
+
+    def test_equity_cost_excludes_multiplier(self) -> None:
+        # Equity fills must not apply the option multiplier.
+        fill = _map_fill(_make_envelope(), _TEST_TZ)
+        self.assertAlmostEqual(fill.cost, 150.25 * 100.0)
+
+    def test_non_integer_multiplier_raises(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Non-integer contract multiplier"):
+            _map_fill(
+                _envelope_with_contract(_option_contract(multiplier="abc")),
+                _TEST_TZ,
+            )
+
+    def test_zero_multiplier_raises(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Non-positive contract multiplier"):
+            _map_fill(
+                _envelope_with_contract(_option_contract(multiplier="0")),
+                _TEST_TZ,
+            )
+
 
 # ── on_message dispatch tests ───────────────────────────────────────
 

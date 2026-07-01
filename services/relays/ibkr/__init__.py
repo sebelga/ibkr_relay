@@ -269,6 +269,7 @@ def _map_fill(envelope: WsFillEnvelope, tz: ZoneInfo) -> Fill:
     # Mirror Flex's convention: Fill.symbol = full instrument identifier,
     # Fill.option = nested OptionContract for derivatives, None otherwise.
     option: OptionContract | None
+    multiplier: int
     if asset_class == "option":
         symbol = contract.localSymbol.strip().replace(" ", "")
         if not symbol:
@@ -277,9 +278,21 @@ def _map_fill(envelope: WsFillEnvelope, tz: ZoneInfo) -> Fill:
                 f" underlying={contract.symbol!r} — cannot identify the contract"
             )
         option = _build_option_contract(contract, exec_id)
+        try:
+            multiplier = int(contract.multiplier)
+        except (ValueError, TypeError) as exc:
+            raise ValueError(
+                f"Non-integer contract multiplier {contract.multiplier!r}"
+                f" for option execId={exec_id!r}"
+            ) from exc
+        if multiplier <= 0:
+            raise ValueError(
+                f"Non-positive contract multiplier {multiplier} for option execId={exec_id!r}"
+            )
     else:
         symbol = contract.symbol
         option = None
+        multiplier = 1
 
     return Fill(
         execId=exec_id,
@@ -290,7 +303,7 @@ def _map_fill(envelope: WsFillEnvelope, tz: ZoneInfo) -> Fill:
         orderType=None,  # WS events don't carry order type info
         price=ex.price,
         volume=ex.shares,
-        cost=ex.price * ex.shares,
+        cost=ex.price * ex.shares * multiplier,
         fee=abs(cr.commission),  # Always positive (amount paid)
         timestamp=ts,
         source=source,
