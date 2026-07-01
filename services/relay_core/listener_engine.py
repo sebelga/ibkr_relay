@@ -25,6 +25,7 @@ from relay_core.dedup import init_db as _init_dedup_db
 from relay_core.env import get_env, get_env_int
 from relay_core.fx import enrich_if_enabled
 from relay_core.notifier import notify
+from relay_core.notifier.audit import log_fills
 from relay_core.notifier.models import WebhookPayloadTrades
 from shared import Fill, RelayName, aggregate_fills
 
@@ -154,6 +155,7 @@ def _send_and_mark(
     relay = get_relay(relay_name)
     conn = _init_dedup_db(db_path)
     _parse_errors = parse_errors or []
+    log_fills(relay_name, fills)
     try:
         prefixed_candidates = _prefix_ids(relay_name, fills)
         already_seen_prefixed = get_processed_ids(conn, prefixed_candidates)
@@ -226,6 +228,7 @@ def _send_no_mark(
     """
     relay = get_relay(relay_name)
     _parse_errors = parse_errors or []
+    log_fills(relay_name, fills)
     trades = aggregate_fills(fills)
 
     fx_errors: list[str] = []

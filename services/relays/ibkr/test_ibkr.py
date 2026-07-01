@@ -460,6 +460,35 @@ class TestOptionMapFill(unittest.TestCase):
                 _TEST_TZ,
             )
 
+    # ── cost / multiplier ────────────────────────────────────────────
+
+    def test_option_cost_includes_multiplier(self) -> None:
+        # shares=2 (2 contracts) makes the 100x factor unambiguously from the
+        # contract multiplier, not a coincidence of shares==multiplier.
+        envelope = _envelope_with_contract(_option_contract())
+        envelope.fill.execution = envelope.fill.execution.model_copy(update={"shares": 2.0})
+        fill = _map_fill(envelope, _TEST_TZ)
+        self.assertAlmostEqual(fill.cost, 150.25 * 2.0 * 100)
+
+    def test_equity_cost_excludes_multiplier(self) -> None:
+        # Equity fills must not apply the option multiplier.
+        fill = _map_fill(_make_envelope(), _TEST_TZ)
+        self.assertAlmostEqual(fill.cost, 150.25 * 100.0)
+
+    def test_non_integer_multiplier_raises(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Non-integer contract multiplier"):
+            _map_fill(
+                _envelope_with_contract(_option_contract(multiplier="abc")),
+                _TEST_TZ,
+            )
+
+    def test_zero_multiplier_raises(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Non-positive contract multiplier"):
+            _map_fill(
+                _envelope_with_contract(_option_contract(multiplier="0")),
+                _TEST_TZ,
+            )
+
 
 # ── on_message dispatch tests ───────────────────────────────────────
 

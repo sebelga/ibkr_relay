@@ -11,6 +11,7 @@ from relay_core.alerter import send_alert
 from relay_core.env import get_env, get_env_int
 from shared import redact_url
 
+from .audit import log_payload
 from .base import BaseNotifier
 from .webhook import WebhookNotifier
 
@@ -227,6 +228,8 @@ def notify(
     email alert via :mod:`relay_core.alerter` — best-effort, throttled, and
     fully optional (silent no-op when alert env vars are unset).
     """
+    log_payload(relay_name, payload)
+
     if not notifiers:
         log.info("No notifiers configured — skipping notification")
         return

@@ -33,6 +33,7 @@ To add a new broker, see the [`add-relay-adapter`](../../.claude/skills/add-rela
 - The debounce buffer is **per-orderId**: each orderId has its own quiet-window timer and flushes immediately when a fill arrives with `OnMessageResult.order_complete=True`.
 - On successful notify the listener writes both `execId` and `orderId` to the shared dedup DB.
 - The `connect` callback owns the connection protocol (auth, subscription). The engine only manages the message loop and reconnection.
+- **Bridge WS `last_seq` persistence** — `get_last_bridge_seq` / `set_last_bridge_seq` in `poller_engine.py` read/write the last delivered bridge sequence number under key `{relay}:bridge_last_seq` in the metadata DB. The adapter's `connect` callback reads this on startup and writes it on every message via `asyncio.to_thread`. Prevents the bridge from replaying its full event buffer on relay restart (which would cause duplicate webhook fires). Falls back gracefully to in-memory-only tracking when the metadata DB is unavailable.
 
 ## Context (singleton)
 
@@ -55,6 +56,7 @@ To add a new broker, see the [`add-relay-adapter`](../../.claude/skills/add-rela
 - **Adding a new backend** — create `services/relay_core/notifier/<name>.py` extending `BaseNotifier`, add to `REGISTRY` in `__init__.py`. Constructor must validate all required env vars.
 - **Engines resolve notifiers from the relay context** — loaded once at startup per relay, stored on `BrokerRelay`, accessed via `get_relay(name).notifiers`.
 - **Debug webhook URL resolution** — `WebhookNotifier.__init__` calls `_resolve_webhook_url()`. If `DEBUG_WEBHOOK_PATH` is set, URL is overridden to `http://debug:9000/debug/webhook/{path}` (container DNS). Otherwise reads `TARGET_WEBHOOK_URL`. No env var mutation — resolved URL stored in `self._url`.
+- **Fill audit log** — `audit.py` writes a rotating JSONL file at `/data/logs/fills_audit.jsonl` (daily rotation, 7-day retention; override via `FILL_AUDIT_LOG_PATH`). Two functions: `log_fills(relay_name, fills)` called from both engines before the dedup step (captures every fill considered including future duplicates), and `log_payload(relay_name, payload)` called inside `notify()` before dispatch (captures the aggregated `WebhookPayloadTrades`). Uses `@functools.cache` to initialise once; silently disabled when the log directory cannot be created.
 
 ## Dedup Package (`relay_core/dedup/`)
 
@@ -63,7 +65,7 @@ To add a new broker, see the [`add-relay-adapter`](../../.claude/skills/add-rela
 - Two write paths: `mark_processed_batch` (exec_id only, poller) and `mark_processed_batch_with_orders` (listener).
 - Two read paths: `get_processed_ids` (exec_id set lookup) and `get_recently_processed_order_ids` (relay-prefixed + time-windowed; ignores NULL-order_id rows so poller-only marks never block subsequent polls).
 - **Dedup key priority**: `ibExecId → transactionId → tradeID`, resolved in `services/relays/ibkr/flex_parser.py` at parse time by setting `Fill.execId`. The engines then dedup directly on `fill.execId` — there is no helper indirection.
-- The poller engine has a separate metadata DB at `META_DB_PATH` (default `/data/meta/<relay>.db`) on a `relay-meta` volume for the timestamp watermark.
+- The poller engine has a separate metadata DB at `META_DB_PATH` (default `/data/meta/relay.db`) on a `relay-meta` volume. It stores two key types: `{relay}:last_poll_ts` (timestamp watermark) and `{relay}:bridge_last_seq` (bridge WS resume seq). See `get_last_poll_ts` / `set_last_poll_ts` and `get_last_bridge_seq` / `set_last_bridge_seq` in `poller_engine.py`.
 
 ## Routes (`relay_core/routes/`)
 

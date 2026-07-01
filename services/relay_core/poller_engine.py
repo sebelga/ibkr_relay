@@ -22,12 +22,14 @@ from relay_core.dedup import init_db as _init_dedup_db
 from relay_core.env import get_env, get_env_int
 from relay_core.fx import enrich_if_enabled
 from relay_core.notifier import notify
+from relay_core.notifier.audit import log_fills
 from relay_core.notifier.models import WebhookPayloadTrades
 from shared import Fill, RelayName, Trade, aggregate_fills, to_epoch
 
 log = logging.getLogger(__name__)
 
 WATERMARK_KEY_SUFFIX = "last_poll_ts"
+BRIDGE_SEQ_KEY_SUFFIX = "bridge_last_seq"
 
 
 # ── Poller configuration ─────────────────────────────────────────────
@@ -141,6 +143,32 @@ def set_last_poll_ts(
     meta_conn.commit()
 
 
+def get_last_bridge_seq(meta_conn: sqlite3.Connection, relay_name: str) -> int:
+    """Return the last delivered bridge WS sequence number, or 0 if unknown."""
+    key = f"{relay_name}:{BRIDGE_SEQ_KEY_SUFFIX}"
+    row = meta_conn.execute(
+        "SELECT value FROM metadata WHERE key = ?", (key,),
+    ).fetchone()
+    if not row:
+        return 0
+    try:
+        return int(row[0])
+    except (TypeError, ValueError):
+        return 0
+
+
+def set_last_bridge_seq(
+    meta_conn: sqlite3.Connection, relay_name: str, seq: int,
+) -> None:
+    """Persist the last delivered bridge WS sequence number."""
+    key = f"{relay_name}:{BRIDGE_SEQ_KEY_SUFFIX}"
+    meta_conn.execute(
+        "INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)",
+        (key, str(seq)),
+    )
+    meta_conn.commit()
+
+
 def _prefix_ids(relay_name: str, exec_ids: list[str]) -> list[str]:
     """Add relay prefix to exec IDs for dedup namespace isolation."""
     return [f"{relay_name}:{eid}" for eid in exec_ids]
@@ -249,6 +277,9 @@ def poll_once(
         else:
             candidates = all_fills
             relay_log.info("No timestamp watermark — processing all %d fill(s)", len(candidates))
+
+        # Audit log before dedup so duplicates are visible in the log.
+        log_fills(relay_name, candidates)
 
         # Dedup remaining candidates against stored exec IDs (prefixed by relay name)
         candidate_ids = {f.execId for f in candidates}

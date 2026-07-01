@@ -5,8 +5,10 @@ generic ``relay_core`` engines.  All IBKR-specific logic lives here:
 env var getters, Flex fetch, XML parsing, WS envelope mapping.
 """
 
+import asyncio
 import logging
 import os
+import sqlite3
 from collections.abc import Awaitable, Callable
 from typing import Any, Literal, cast
 from zoneinfo import ZoneInfo
@@ -25,6 +27,12 @@ from relay_core import (
     get_poll_interval,
     is_listener_enabled,
     is_poller_enabled,
+)
+from relay_core.poller_engine import (
+    META_DB_PATH,
+    get_last_bridge_seq,
+    init_meta_db,
+    set_last_bridge_seq,
 )
 from shared import (
     BuySell,
@@ -269,6 +277,7 @@ def _map_fill(envelope: WsFillEnvelope, tz: ZoneInfo) -> Fill:
     # Mirror Flex's convention: Fill.symbol = full instrument identifier,
     # Fill.option = nested OptionContract for derivatives, None otherwise.
     option: OptionContract | None
+    multiplier: int
     if asset_class == "option":
         symbol = contract.localSymbol.strip().replace(" ", "")
         if not symbol:
@@ -277,9 +286,21 @@ def _map_fill(envelope: WsFillEnvelope, tz: ZoneInfo) -> Fill:
                 f" underlying={contract.symbol!r} — cannot identify the contract"
             )
         option = _build_option_contract(contract, exec_id)
+        try:
+            multiplier = int(contract.multiplier)
+        except (ValueError, TypeError) as exc:
+            raise ValueError(
+                f"Non-integer contract multiplier {contract.multiplier!r}"
+                f" for option execId={exec_id!r}"
+            ) from exc
+        if multiplier <= 0:
+            raise ValueError(
+                f"Non-positive contract multiplier {multiplier} for option execId={exec_id!r}"
+            )
     else:
         symbol = contract.symbol
         option = None
+        multiplier = 1
 
     return Fill(
         execId=exec_id,
@@ -290,7 +311,7 @@ def _map_fill(envelope: WsFillEnvelope, tz: ZoneInfo) -> Fill:
         orderType=None,  # WS events don't carry order type info
         price=ex.price,
         volume=ex.shares,
-        cost=ex.price * ex.shares,
+        cost=ex.price * ex.shares * multiplier,
         fee=abs(cr.commission),  # Always positive (amount paid)
         timestamp=ts,
         source=source,
@@ -423,15 +444,49 @@ def _on_message_factory(
     return handler
 
 
+def _persist_bridge_seq(db_path: str, seq: int) -> None:
+    """Write bridge last_seq using a fresh thread-local connection.
+
+    Called exclusively inside ``asyncio.to_thread`` so each invocation owns
+    its connection — no cross-thread sharing of sqlite3.Connection objects.
+    Persistence is best-effort: a transient write failure is logged as a
+    warning and the seq falls back to in-memory tracking for that message.
+    """
+    try:
+        conn = sqlite3.connect(db_path)
+        try:
+            set_last_bridge_seq(conn, "ibkr", seq)
+        finally:
+            conn.close()
+    except (OSError, sqlite3.Error) as exc:
+        log.warning("[ibkr] Failed to persist bridge seq=%d: %s — tracking in-memory only", seq, exc)
+
+
 def _build_connect(
-    ws_url: str, api_token: str,
+    ws_url: str,
+    api_token: str,
+    meta_db_path: str | None = None,
 ) -> Callable[[aiohttp.ClientSession], Awaitable[aiohttp.ClientWebSocketResponse]]:
     """Build a connect callback that opens an authenticated WS connection.
 
-    Tracks ``last_seq`` across reconnects so the bridge can resume from
-    the last seen sequence number.
+    Tracks ``last_seq`` across reconnects AND across process restarts.
+    On startup the last persisted seq is read from the meta DB (if supplied),
+    so the bridge resumes from where the relay left off instead of replaying
+    its full event buffer from seq=0.
     """
-    state = {"last_seq": 0}
+    initial = 0
+    if meta_db_path is not None:
+        try:
+            conn = sqlite3.connect(meta_db_path)
+            try:
+                initial = get_last_bridge_seq(conn, "ibkr")
+            finally:
+                conn.close()
+        except (OSError, sqlite3.Error) as exc:
+            log.warning("[ibkr] Could not read persisted bridge seq — starting from 0: %s", exc)
+    if initial > 0:
+        log.info("[ibkr] Resuming bridge WS from persisted last_seq=%d", initial)
+    state = {"last_seq": initial}
 
     async def connect(
         session: aiohttp.ClientSession,
@@ -455,8 +510,15 @@ def _build_connect(
                 try:
                     data = json.loads(msg.data)
                     seq = data.get("seq")
-                    if isinstance(seq, int):
+                    if isinstance(seq, int) and seq > state["last_seq"]:
                         state["last_seq"] = seq
+                        if meta_db_path is not None:
+                            # Persist off the event loop — each to_thread call
+                            # opens its own connection so no connection is shared
+                            # across threads.
+                            await asyncio.to_thread(
+                                _persist_bridge_seq, meta_db_path, seq,
+                            )
                 except (ValueError, TypeError) as exc:
                     log.debug("[ibkr] Could not parse seq from WS message: %s", exc)
             return msg
@@ -480,8 +542,23 @@ def _build_listener_config(tz: ZoneInfo) -> ListenerConfig | None:
 
     exec_events_enabled = _is_exec_events_enabled()
 
+    # Persist bridge last_seq across restarts so reconnects resume from where
+    # the relay left off, rather than replaying the full bridge event buffer.
+    # Falls back gracefully when the meta-DB path is unavailable (e.g. in tests
+    # or read-only environments) — persistence is an optimisation, not required
+    # for correctness (dedup remains the primary guard).
+    _meta_db_path: str | None = None
+    try:
+        conn = init_meta_db()
+        conn.close()
+        _meta_db_path = META_DB_PATH
+    except (OSError, sqlite3.Error) as exc:
+        log.warning("[ibkr] Bridge seq will not be persisted — meta DB unavailable: %s", exc)
+
     return ListenerConfig(
-        connect=_build_connect(_get_bridge_ws_url(), _get_bridge_api_token()),
+        connect=_build_connect(
+            _get_bridge_ws_url(), _get_bridge_api_token(), meta_db_path=_meta_db_path,
+        ),
         on_message=_on_message_factory(exec_events_enabled, tz),
         event_filter=_event_filter,
         debounce_ms=get_debounce_ms("ibkr"),
