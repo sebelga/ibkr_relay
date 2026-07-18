@@ -2,8 +2,7 @@
 
 from typing import Literal
 
-from shared.models import AssetClass, BuySell, Fill, OptionContract
-from shared.utilities import aggregate_fills
+from shared import AssetClass, BuySell, Fill, OptionContract, aggregate_fills
 
 
 def _fill(
