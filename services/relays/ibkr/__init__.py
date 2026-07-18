@@ -234,8 +234,12 @@ def _map_fill(envelope: WsFillEnvelope, tz: ZoneInfo) -> Fill:
     """Map a WsFillEnvelope to a relay Fill model.
 
     Raises ``ValueError`` describing why the fill was skipped if:
+    - The execution ``execId`` is empty.
+    - The execution is a combo summary (``secType == "BAG"``).
     - The execution side is not ``"BOT"`` or ``"SLD"``.
     - The execution time cannot be parsed.
+    - For options: the ``localSymbol`` is empty, or the contract
+      ``multiplier`` is not a positive integer.
 
     *tz* is the IANA timezone to interpret IBKR's naive timestamps in.
     """
@@ -248,6 +252,18 @@ def _map_fill(envelope: WsFillEnvelope, tz: ZoneInfo) -> Fill:
         raise ValueError(
             f"Empty execId in envelope seq={envelope.seq} type={envelope.type!r}"
             f" symbol={contract.symbol!r}"
+        )
+
+    # IBKR reports a synthetic "combo summary" execution (secType="BAG") for
+    # multi-leg orders — under the underlying symbol, with zero commission and
+    # the parent order's permId (which we map to Fill.orderId). It is not a
+    # tradeable leg: the real legs arrive as their own executions. Skip it so
+    # it neither fires a phantom underlying-symbol webhook nor shares an
+    # orderId with the legs (which would merge them in aggregate_fills).
+    if contract.secType == "BAG":
+        raise ValueError(
+            f"Skipping combo (BAG) summary execution execId={exec_id!r}"
+            f" underlying={contract.symbol!r} — legs are reported separately"
         )
 
     # Financial enum — never assume a default for buy/sell side.
