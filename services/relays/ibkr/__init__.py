@@ -234,8 +234,12 @@ def _map_fill(envelope: WsFillEnvelope, tz: ZoneInfo) -> Fill:
     """Map a WsFillEnvelope to a relay Fill model.
 
     Raises ``ValueError`` describing why the fill was skipped if:
+    - The execution ``execId`` is empty.
+    - The execution is a combo summary (``secType == "BAG"``).
     - The execution side is not ``"BOT"`` or ``"SLD"``.
     - The execution time cannot be parsed.
+    - For options: the ``localSymbol`` is empty, or the contract
+      ``multiplier`` is not a positive integer.
 
     *tz* is the IANA timezone to interpret IBKR's naive timestamps in.
     """

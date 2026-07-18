@@ -98,10 +98,10 @@ def _make_envelope(
     exec_id: str = "0001",
     side: str = "BOT",
     source: Literal["live", "reconciled"] = "live",
-    contract: WsContract = _DEFAULT_CONTRACT,
+    contract: WsContract | None = None,
 ) -> WsFillEnvelope:
     fill = WsFill(
-        contract=contract,
+        contract=contract if contract is not None else _DEFAULT_CONTRACT,
         execution=_DEFAULT_EXECUTION.model_copy(
             update={"execId": exec_id, "side": side},
         ),

@@ -1,6 +1,8 @@
 """Unit tests for shared.aggregate_fills."""
 
-from shared.models import BuySell, Fill, OptionContract
+from typing import Literal
+
+from shared.models import AssetClass, BuySell, Fill, OptionContract
 from shared.utilities import aggregate_fills
 
 
@@ -12,7 +14,7 @@ def _fill(
     price: float,
     volume: float,
     *,
-    asset_class: str = "option",
+    asset_class: AssetClass = "option",
     fee: float = 1.0,
     option: OptionContract | None = None,
 ) -> Fill:
@@ -20,7 +22,7 @@ def _fill(
         execId=exec_id,
         orderId=order_id,
         symbol=symbol,
-        assetClass=asset_class,  # type: ignore[arg-type]
+        assetClass=asset_class,
         side=side,
         price=price,
         volume=volume,
@@ -34,10 +36,9 @@ def _fill(
     )
 
 
-def _opt(root: str, strike: float, kind: str) -> OptionContract:
+def _opt(root: str, strike: float, kind: Literal["call", "put"]) -> OptionContract:
     return OptionContract(
-        rootSymbol=root, strike=strike, expiryDate="2028-12-15",
-        type=kind,  # type: ignore[arg-type]
+        rootSymbol=root, strike=strike, expiryDate="2028-12-15", type=kind,
     )
 
 
