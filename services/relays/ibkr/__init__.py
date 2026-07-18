@@ -250,6 +250,18 @@ def _map_fill(envelope: WsFillEnvelope, tz: ZoneInfo) -> Fill:
             f" symbol={contract.symbol!r}"
         )
 
+    # IBKR reports a synthetic "combo summary" execution (secType="BAG") for
+    # multi-leg orders — under the underlying symbol, with zero commission and
+    # the parent order's permId (which we map to Fill.orderId). It is not a
+    # tradeable leg: the real legs arrive as their own executions. Skip it so
+    # it neither fires a phantom underlying-symbol webhook nor shares an
+    # orderId with the legs (which would merge them in aggregate_fills).
+    if contract.secType == "BAG":
+        raise ValueError(
+            f"Skipping combo (BAG) summary execution execId={exec_id!r}"
+            f" underlying={contract.symbol!r} — legs are reported separately"
+        )
+
     # Financial enum — never assume a default for buy/sell side.
     side = _SIDE_MAP.get(ex.side)
     if side is None:

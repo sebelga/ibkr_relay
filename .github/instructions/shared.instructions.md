@@ -11,7 +11,7 @@ For the three-location model layout and the rule about model shims, see `service
 ## Module responsibilities
 
 - **`models.py`** — CommonFill primitives: `Fill`, `Trade`, `OptionContract`, `BuySell`, `AssetClass`, `OrderType`, `Source`, `RelayName`. Pydantic models with `ConfigDict(extra="forbid")` on external-contract types. The `__init__.py` barrel re-exports these.
-- **`utilities.py`** — Internal helper: `aggregate_fills` (groups fills by `orderId` and computes per-trade VWAP, summed cost/fee, latest timestamp). Not re-exported by model shims — consumers import directly: `from shared import aggregate_fills`. Per-relay normalisation helpers (`normalize_order_type`, `normalize_asset_class`) live in the owning adapter package (`services/relays/ibkr/utilities.py`, `services/relays/kraken/ws_parser.py`), not here.
+- **`utilities.py`** — Internal helper: `aggregate_fills` (groups fills by `(orderId, symbol)` and computes per-trade VWAP, summed cost/fee, latest timestamp — symbol is in the key so combo-order legs sharing one `orderId` stay distinct trades). Not re-exported by model shims — consumers import directly: `from shared import aggregate_fills`. Per-relay normalisation helpers (`normalize_order_type`, `normalize_asset_class`) live in the owning adapter package (`services/relays/ibkr/utilities.py`, `services/relays/kraken/ws_parser.py`), not here.
 - **`time_format.py`** — `normalize_timestamp(iso, *, assume_tz=None)`. **Broker-agnostic.** Only accepts ISO-8601. Never teach it about broker-specific formats — those belong in `services/relays/<name>/timestamps.py`.
 
 ## Rules

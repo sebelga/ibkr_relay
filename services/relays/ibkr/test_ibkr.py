@@ -98,9 +98,10 @@ def _make_envelope(
     exec_id: str = "0001",
     side: str = "BOT",
     source: Literal["live", "reconciled"] = "live",
+    contract: WsContract = _DEFAULT_CONTRACT,
 ) -> WsFillEnvelope:
     fill = WsFill(
-        contract=_DEFAULT_CONTRACT,
+        contract=contract,
         execution=_DEFAULT_EXECUTION.model_copy(
             update={"execId": exec_id, "side": side},
         ),
@@ -296,6 +297,16 @@ class TestMapFill(unittest.TestCase):
     def test_empty_exec_id_raises(self) -> None:
         with self.assertRaisesRegex(ValueError, "Empty execId"):
             _map_fill(_make_envelope(exec_id=""), _TEST_TZ)
+
+    def test_combo_bag_summary_skipped(self) -> None:
+        """IBKR combo orders emit a synthetic BAG execution under the
+        underlying symbol — it must be skipped so it neither fires a phantom
+        webhook nor shares an orderId with (and thus merges) the real legs."""
+        bag_contract = _DEFAULT_CONTRACT.model_copy(
+            update={"secType": "BAG", "symbol": "SPCX", "localSymbol": "SPCX"},
+        )
+        with self.assertRaisesRegex(ValueError, "combo .BAG. summary"):
+            _map_fill(_make_envelope(contract=bag_contract), _TEST_TZ)
 
     def test_fee_is_positive(self) -> None:
         fill = _map_fill(_make_envelope(), _TEST_TZ)

@@ -25,6 +25,11 @@ For `assetCategory == "OPT"` fills:
 - `strike`, `expiryDate` (via `flex_date_to_iso()`), and `type` (`"call"`/`"put"` from the `putCall` attribute) are required. Rows with missing or invalid option metadata are skipped with a parse error.
 - **`Fill.cost = price × volume × contract.multiplier`** (bridge path) — options are priced per share; each contract covers `multiplier` shares (standard = 100). `_map_fill` parses `WsContract.multiplier` as `int`; a non-integer or non-positive value raises `ValueError` and is surfaced as a webhook parse error. Equity fills use `multiplier = 1` so the formula is uniform. The Flex path is unaffected (IBKR pre-calculates `cost` in the XML).
 
+## Combo (multi-leg / BAG) orders
+
+- **`_map_fill` skips `secType == "BAG"` executions** (bridge path). IBKR emits a synthetic "combo summary" execution for multi-leg orders — reported under the *underlying* symbol, with zero commission and the parent order's `permId`. It is not a tradeable leg (the real legs arrive as their own executions), and it shares the legs' `permId` (→ `Fill.orderId`). Left in, it would (1) fire a phantom underlying-symbol webhook and (2) merge with the legs in `aggregate_fills`. The Flex path never sees it (IBKR omits the combo leg from Flex reports).
+- **`aggregate_fills` groups by `(orderId, symbol)`, not `orderId` alone** — the second reason combo legs stay separate: even sharing one `permId`, distinct option contracts have distinct `Fill.symbol`, so each leg becomes its own `Trade`.
+
 ## Fixture management
 
 - `fixtures/sanitize.py` replaces real account/order/execution IDs in a raw Flex dump with synthetic values, then trims the fixture to at most 6 distinct orders (`max_orders` / `_MAX_ORDERS = 6`), keeping all executions for the retained orders.
