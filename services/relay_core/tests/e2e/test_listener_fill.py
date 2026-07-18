@@ -20,8 +20,10 @@ from relay_core.tests.e2e.conftest import DEBUG_INBOX_PATH
 
 pytestmark = pytest.mark.usefixtures("_bridge_preflight")
 
+# Mirrors the Makefile's E2E_COMPOSE. SITE_DOMAIN / API_TOKEN / MD_API_TOKEN
+# are supplied by --env-file .env.test (they satisfy the base compose
+# ${VAR:?...} guards), so no inline env exports are needed here.
 _E2E_COMPOSE = (
-    "SITE_DOMAIN=unused API_TOKEN=test-token "
     "docker compose -f docker-compose.yml -f docker-compose.test.yml "
     "-p relayport-test --env-file .env.test"
 )
