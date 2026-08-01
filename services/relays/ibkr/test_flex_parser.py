@@ -806,7 +806,9 @@ class TestAllFieldsRoundTrip:
         assert f.orderType == "market"
         assert f.price == pytest.approx(254.6)
         assert f.volume == pytest.approx(1.0)
-        assert f.cost == pytest.approx(254.6)
+        # BUY → cash out, so cost is negative regardless of Flex's
+        # cost-basis sign (see the sign convention on shared.models.Fill).
+        assert f.cost == pytest.approx(-254.6)
         assert f.fee == pytest.approx(0.62125)
         assert f.timestamp == "2025-04-03T15:30:00"
         assert f.source == "flex"
@@ -916,7 +918,8 @@ class TestAggregateMultipleFills:
         assert two_fill_trade.fee == pytest.approx(3.0)
 
     def test_summed_cost(self, two_fill_trade: Trade) -> None:
-        assert two_fill_trade.cost == pytest.approx(3200.0)
+        # Both fills are BUYs → summed cash delta is negative.
+        assert two_fill_trade.cost == pytest.approx(-3200.0)
 
     def test_fill_count(self, two_fill_trade: Trade) -> None:
         assert two_fill_trade.fillCount == 2

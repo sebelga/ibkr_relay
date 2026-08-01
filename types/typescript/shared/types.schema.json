@@ -40,7 +40,7 @@
     },
     "Trade": {
       "additionalProperties": false,
-      "description": "Aggregated trade (one or more fills for the same order).",
+      "description": "Aggregated trade (one or more fills for the same order).\n\nCarries the same signed-delta convention as :class:`Fill` \u2014 see the\n\"Sign convention\" table there. ``volume`` / ``cost`` / ``fee`` are the\nsums of the constituent fills, so the convention survives aggregation\nunchanged and a stream of Trades folds into a position by ``SUM``.",
       "properties": {
         "orderId": {
           "type": "string"
@@ -178,7 +178,7 @@
     },
     "Fill": {
       "additionalProperties": false,
-      "description": "Individual execution from a broker (CommonFill spec).",
+      "description": "Individual execution from a broker (CommonFill spec).\n\n**Sign convention (PUBLIC CONTRACT).** RelayPort deliberately departs\nfrom the FIX/exchange norm of \"unsigned magnitude + side flag\". Here\n``volume`` and ``cost`` are *signed deltas*, so consumers can fold a\nstream of trades into a position with a plain ``SUM``:\n\n===========  ===========================  ========  ========\nField        Meaning                      Buy       Sell\n===========  ===========================  ========  ========\n``volume``   position delta (units)       positive  negative\n``cost``     cash delta (currency)        negative  positive\n``fee``      amount paid (always a debit) positive  positive\n``price``    unit price (never signed)    positive  positive\n===========  ===========================  ========  ========\n\nSo ``SUM(volume)`` grouped by ``symbol`` yields the net position, and\n``SUM(cost) - SUM(fee)`` yields the net cash impact.\n\nTwo caveats consumers must know. (1) ``SUM(volume)`` is *net units\ntransacted through RelayPort*, not a custody-accurate holding \u2014 splits,\ntransfers, and option assignment/exercise move a real position without\never producing a fill. (2) Never sum across asset classes: an option's\n``volume`` is in contracts, and one contract covers ``multiplier``\n(typically 100) shares. Group by ``symbol`` \u2014 OCC tickers keep option\nseries distinct from their underlying.\n\n``side`` remains authoritative for direction and is always consistent\nwith the sign; it is not redundant, since a zero-volume fill carries no\nsign. Signs are enforced by :func:`_apply_sign_convention`, never by\nthe adapters, so a broker's native convention cannot leak out.",
       "properties": {
         "execId": {
           "type": "string"

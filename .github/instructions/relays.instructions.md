@@ -8,6 +8,28 @@ Each broker adapter is a small package that wires broker-specific logic into the
 
 For the full step-by-step procedure to add a new broker, see the `add-relay-adapter` skill in `.claude/skills/`.
 
+## Sign convention (volume / cost / fee)
+
+RelayPort departs from the FIX/exchange norm of "unsigned magnitude + side flag": `volume` and `cost` are **signed deltas**, so consumers fold trades into positions with a plain `SUM`.
+
+| Field    | Meaning                      | Buy      | Sell     |
+| -------- | ---------------------------- | -------- | -------- |
+| `volume` | Position delta (units)       | positive | negative |
+| `cost`   | Cash delta (currency)        | negative | positive |
+| `fee`    | Amount paid (always a debit) | positive | positive |
+| `price`  | Unit price (never signed)    | positive | positive |
+
+**Adapters must NOT sign anything.** Forward the broker's native `volume` / `cost` untouched — a `model_validator` on `Fill` and `Trade` (`_apply_sign_convention` in `services/shared/models.py`) reduces each value to its magnitude and re-signs it from `side`. It is idempotent, so an already-correctly-signed broker value passes through unchanged.
+
+This is centralised precisely because brokers disagree, and not only about *whether* they sign:
+
+- **IBKR Flex** signs `quantity` our way (buy +, sell −) but reports `cost` as a **cost-basis** delta (buy +, sell −) — inverted relative to a cash delta.
+- **IBKR bridge** (`ib_async`), **Kraken REST**, and **Kraken WS** all report unsigned magnitudes with direction only on the side field.
+
+A regression here is invisible to mypy and to buy-only testing — the two IBKR paths silently disagreed on sell volume in production until a `sell` shipped with a positive volume. When adding an adapter, **always add a sell-side test asserting `volume < 0` and `cost > 0`**; a buy-only fixture passes under either convention.
+
+`price` is never signed — direction lives on volume/cost, and signing price too would double-count it and corrupt the VWAP weighting in `aggregate_fills` (which weights by `abs(volume)` for exactly this reason).
+
 ## Fee normalisation convention
 
 When mapping a broker fill to a `Fill` model, use this priority order for the `fee` field:

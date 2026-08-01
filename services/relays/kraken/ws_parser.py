@@ -125,6 +125,8 @@ def _parse_fill(item: KrakenWsExecution) -> Fill:
         side=side,
         orderType=order_type,
         price=require_float(item, "last_price", ctx),
+        # Kraken WS reports unsigned magnitudes with direction only on
+        # `side`; both fields are re-signed by Fill.
         volume=require_float(item, "last_qty", ctx),
         cost=require_float(item, "cost", ctx),
         fee=total_fee,

@@ -5,9 +5,9 @@ Do not edit manually — run ``make types`` to regenerate.
 """
 
 from enum import Enum
-from typing import Any, Literal
+from typing import Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 RelayName = Literal["ibkr", "kraken"]
 """Allowed relay identifiers — single source of truth.
@@ -49,6 +49,49 @@ def _all_fields_required(schema: dict[str, Any]) -> None:
     schema["required"] = list(properties.keys())
 
 
+def _apply_sign_convention(
+    side: BuySell, volume: float, cost: float, fee: float,
+) -> tuple[float, float, float]:
+    """Force ``volume`` / ``cost`` / ``fee`` onto the canonical sign convention.
+
+    See the "Sign convention" block on :class:`Fill` for the contract itself.
+    Summary: ``volume`` is a **position delta** (buy > 0, sell < 0) and
+    ``cost`` is the matching **cash delta**, so it carries the *opposite*
+    sign (buy < 0 — money out; sell > 0 — money in). ``fee`` is always a
+    debit and therefore always positive.
+
+    Every incoming value is reduced to its magnitude and re-signed from
+    ``side``, which makes this idempotent and lets each adapter forward the
+    broker's native value untouched. That matters because brokers disagree,
+    and not only about *whether* they sign:
+
+    * IBKR Flex signs ``quantity`` our way (buy +, sell -) but reports
+      ``cost`` as a **cost-basis** delta — buy +, sell - — i.e. inverted
+      relative to a cash delta.
+    * The IBKR bridge (``ib_async``), Kraken REST, and Kraken WS all report
+      unsigned magnitudes with direction carried only in the side field.
+
+    Normalising here rather than in each adapter means a new relay cannot
+    silently introduce a fourth convention: whatever it forwards, the
+    contract holds. ``side`` is validated by the adapters before this runs
+    (never defaulted — see the financial-enum rule in CLAUDE.md), so it is
+    trusted as the source of truth for direction.
+
+    Lives beside the models rather than in ``utilities.py`` because
+    ``utilities.py`` imports from this module — the reverse import would be
+    circular — and because it is single-purpose model plumbing, not a
+    general helper (same carve-out as :func:`_all_fields_required`).
+    """
+    magnitude_volume, magnitude_cost = abs(volume), abs(cost)
+    if side is BuySell.BUY:
+        signed_volume, signed_cost = magnitude_volume, -magnitude_cost
+    else:
+        signed_volume, signed_cost = -magnitude_volume, magnitude_cost
+    # ``-abs(0.0)`` is ``-0.0``, which survives JSON round-trips as "-0.0"
+    # and reads as a bug downstream. ``or 0.0`` maps both zeros to +0.0.
+    return signed_volume or 0.0, signed_cost or 0.0, abs(fee) or 0.0
+
+
 class OptionContract(BaseModel):
     """Option-specific contract metadata.
 
@@ -72,7 +115,38 @@ class OptionContract(BaseModel):
 
 
 class Fill(BaseModel):
-    """Individual execution from a broker (CommonFill spec)."""
+    """Individual execution from a broker (CommonFill spec).
+
+    **Sign convention (PUBLIC CONTRACT).** RelayPort deliberately departs
+    from the FIX/exchange norm of "unsigned magnitude + side flag". Here
+    ``volume`` and ``cost`` are *signed deltas*, so consumers can fold a
+    stream of trades into a position with a plain ``SUM``:
+
+    ===========  ===========================  ========  ========
+    Field        Meaning                      Buy       Sell
+    ===========  ===========================  ========  ========
+    ``volume``   position delta (units)       positive  negative
+    ``cost``     cash delta (currency)        negative  positive
+    ``fee``      amount paid (always a debit) positive  positive
+    ``price``    unit price (never signed)    positive  positive
+    ===========  ===========================  ========  ========
+
+    So ``SUM(volume)`` grouped by ``symbol`` yields the net position, and
+    ``SUM(cost) - SUM(fee)`` yields the net cash impact.
+
+    Two caveats consumers must know. (1) ``SUM(volume)`` is *net units
+    transacted through RelayPort*, not a custody-accurate holding — splits,
+    transfers, and option assignment/exercise move a real position without
+    ever producing a fill. (2) Never sum across asset classes: an option's
+    ``volume`` is in contracts, and one contract covers ``multiplier``
+    (typically 100) shares. Group by ``symbol`` — OCC tickers keep option
+    series distinct from their underlying.
+
+    ``side`` remains authoritative for direction and is always consistent
+    with the sign; it is not redundant, since a zero-volume fill carries no
+    sign. Signs are enforced by :func:`_apply_sign_convention`, never by
+    the adapters, so a broker's native convention cannot leak out.
+    """
 
     model_config = ConfigDict(
         extra="forbid", json_schema_extra=_all_fields_required,
@@ -84,9 +158,15 @@ class Fill(BaseModel):
     assetClass: AssetClass
     side: BuySell
     orderType: OrderType | None = None
+    # Unit price — always a positive magnitude, never signed. Direction
+    # lives on volume/cost; signing price too would double-count it and
+    # break the VWAP weighting in aggregate_fills.
     price: float
+    # Position delta: positive on buy, negative on sell.
     volume: float
+    # Cash delta: negative on buy (money out), positive on sell (money in).
     cost: float
+    # Always positive — a fee is a debit regardless of direction.
     fee: float
     timestamp: str
     source: Source
@@ -101,9 +181,22 @@ class Fill(BaseModel):
     option: OptionContract | None = None
     raw: dict[str, Any]
 
+    @model_validator(mode="after")
+    def _enforce_sign_convention(self) -> Self:
+        self.volume, self.cost, self.fee = _apply_sign_convention(
+            self.side, self.volume, self.cost, self.fee,
+        )
+        return self
+
 
 class Trade(BaseModel):
-    """Aggregated trade (one or more fills for the same order)."""
+    """Aggregated trade (one or more fills for the same order).
+
+    Carries the same signed-delta convention as :class:`Fill` — see the
+    "Sign convention" table there. ``volume`` / ``cost`` / ``fee`` are the
+    sums of the constituent fills, so the convention survives aggregation
+    unchanged and a stream of Trades folds into a position by ``SUM``.
+    """
 
     model_config = ConfigDict(
         extra="forbid", json_schema_extra=_all_fields_required,
@@ -114,9 +207,13 @@ class Trade(BaseModel):
     assetClass: AssetClass
     side: BuySell
     orderType: OrderType | None = None
+    # Quantity-weighted average price — a positive magnitude (see Fill.price).
     price: float
+    # Summed position delta: positive on buy, negative on sell.
     volume: float
+    # Summed cash delta: negative on buy, positive on sell.
     cost: float
+    # Summed fees — always positive.
     fee: float
     fillCount: int
     execIds: list[str]
@@ -134,3 +231,10 @@ class Trade(BaseModel):
     fxRateBase: str | None = None
     fxRateSource: FxRateSource | None = None
     raw: dict[str, Any]
+
+    @model_validator(mode="after")
+    def _enforce_sign_convention(self) -> Self:
+        self.volume, self.cost, self.fee = _apply_sign_convention(
+            self.side, self.volume, self.cost, self.fee,
+        )
+        return self

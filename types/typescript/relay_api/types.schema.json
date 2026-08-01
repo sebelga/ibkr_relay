@@ -40,7 +40,7 @@
     },
     "Trade": {
       "additionalProperties": false,
-      "description": "Aggregated trade (one or more fills for the same order).",
+      "description": "Aggregated trade (one or more fills for the same order).\n\nCarries the same signed-delta convention as :class:`Fill` \u2014 see the\n\"Sign convention\" table there. ``volume`` / ``cost`` / ``fee`` are the\nsums of the constituent fills, so the convention survives aggregation\nunchanged and a stream of Trades folds into a position by ``SUM``.",
       "properties": {
         "orderId": {
           "type": "string"

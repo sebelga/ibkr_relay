@@ -21,6 +21,11 @@ export interface WebhookPayloadTrades {
 }
 /**
  * Aggregated trade (one or more fills for the same order).
+ *
+ * Carries the same signed-delta convention as :class:`Fill` — see the
+ * "Sign convention" table there. ``volume`` / ``cost`` / ``fee`` are the
+ * sums of the constituent fills, so the convention survives aggregation
+ * unchanged and a stream of Trades folds into a position by ``SUM``.
  */
 export interface Trade {
   orderId: string;

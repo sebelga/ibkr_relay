@@ -113,8 +113,18 @@ def test_listener_receives_commission_fill(
     # Verify fill shape.
     assert fill_trade["side"] in ("buy", "sell")
     assert fill_trade["fillCount"] >= 1
-    assert fill_trade["volume"] > 0
     assert fill_trade["price"] > 0
     assert fill_trade["fee"] >= 0
     assert fill_trade["source"] == "commissionReportEvent"
     assert len(fill_trade.get("execIds", [])) >= 1
+
+    # Signed-delta convention (see shared.models.Fill): volume is a position
+    # delta, cost the opposite-signed cash delta. Asserted against the actual
+    # side rather than hardcoded, so this still holds if the order above is
+    # ever flipped to a SELL — which is the case that regressed in prod.
+    if fill_trade["side"] == "buy":
+        assert fill_trade["volume"] > 0, "buy must have positive volume"
+        assert fill_trade["cost"] < 0, "buy must have negative cost (cash out)"
+    else:
+        assert fill_trade["volume"] < 0, "sell must have negative volume"
+        assert fill_trade["cost"] > 0, "sell must have positive cost (cash in)"

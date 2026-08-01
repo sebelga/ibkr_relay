@@ -2,6 +2,8 @@
 
 from typing import Literal
 
+import pytest
+
 from shared import AssetClass, BuySell, Fill, OptionContract, aggregate_fills
 
 
@@ -80,13 +82,15 @@ def test_combo_legs_sharing_order_id_split_by_symbol() -> None:
 
     put = by_symbol["SPCX281215P00130000"]
     assert put.side is BuySell.SELL
-    assert put.volume == 1
+    assert put.volume == -1  # sold → negative position delta
+    assert put.cost == pytest.approx(47.82)  # sold → cash in
     assert put.fillCount == 1
     assert put.option is not None and put.option.type == "put"
 
     call = by_symbol["SPCX281215C00100000"]
     assert call.side is BuySell.BUY
-    assert call.volume == 1
+    assert call.volume == 1  # bought → positive position delta
+    assert call.cost == pytest.approx(-62.63)  # bought → cash out
     assert call.fillCount == 1
     assert call.option is not None and call.option.type == "call"
 
