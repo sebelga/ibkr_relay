@@ -433,7 +433,7 @@ When orders fill, the relay POSTs a JSON payload with all trades batched into a 
       "orderType": "market",
       "price": 254.6,
       "volume": 1.0,
-      "cost": 254.6,
+      "cost": -254.6,
       "fee": 1.0,
       "fillCount": 1,
       "execIds": ["0001f4e8.67890abc.01.01"],
@@ -472,10 +472,10 @@ All broker adapters use the same **CommonFill** model. The `data` array contains
 | `assetClass`   | `AssetClass`             | `"equity"`, `"option"`, `"crypto"`, `"future"`, `"forex"`, or `"other"`                                                                                                |
 | `side`         | `"buy" \| "sell"`        | Trade direction (lowercase)                                                                                                                                            |
 | `orderType`    | `OrderType \| null`      | Normalized: `"market"`, `"limit"`, `"stop"`, `"stop_limit"`, `"trailing_stop"`, or `null`                                                                              |
-| `price`        | `number`                 | VWAP when aggregated, single fill price otherwise                                                                                                                      |
-| `volume`       | `number`                 | Sum of fill quantities                                                                                                                                                 |
-| `cost`         | `number`                 | Total cost (sum of fills)                                                                                                                                              |
-| `fee`          | `number`                 | Total fees/commissions (always positive — amount paid)                                                                                                                 |
+| `price`        | `number`                 | VWAP when aggregated, single fill price otherwise. Always a positive magnitude — never signed (see [Sign convention](#sign-convention))                                |
+| `volume`       | `number`                 | Sum of fill quantities, **signed**: positive on buy, negative on sell (see [Sign convention](#sign-convention))                                                        |
+| `cost`         | `number`                 | Net cash delta (sum of fills), **signed**: negative on buy (money out), positive on sell (money in) (see [Sign convention](#sign-convention))                          |
+| `fee`          | `number`                 | Total fees/commissions — always positive (amount paid), never signed                                                                                                   |
 | `fillCount`    | `number`                 | Number of fills aggregated into this trade                                                                                                                             |
 | `execIds`      | `string[]`               | One execution ID per fill (for tracing back to individual fills)                                                                                                       |
 | `timestamp`    | `string`                 | Latest fill timestamp. Canonical form: `YYYY-MM-DDTHH:MM:SS`, always UTC, no `Z` suffix, no fractional seconds                                                         |
@@ -490,6 +490,36 @@ All broker adapters use the same **CommonFill** model. The `data` array contains
 The `raw` object preserves the full broker-specific data. For IBKR Flex, this includes ~100 XML attributes (account info, security details, financial fields, dates). Consumers should treat `raw` as opaque broker data — the CommonFill fields above are the stable contract.
 
 The `errors` array contains warnings about parse problems — it is empty when everything parsed cleanly.
+
+### Sign convention
+
+RelayPort **deliberately departs** from the FIX/exchange norm of "unsigned magnitude + separate side flag". `volume` and `cost` are *signed deltas*, so a consumer can fold a stream of trades into a position with a plain `SUM` — no `CASE WHEN side = 'sell'` anywhere.
+
+| Field    | Meaning                     | Buy        | Sell       |
+| -------- | --------------------------- | ---------- | ---------- |
+| `volume` | Position delta (units)      | positive   | negative   |
+| `cost`   | Cash delta (currency)       | negative   | positive   |
+| `fee`    | Amount paid (always a debit)| positive   | positive   |
+| `price`  | Unit price (never signed)   | positive   | positive   |
+
+`volume` and `cost` always carry **opposite** signs: buying adds units and spends cash; selling removes units and receives cash.
+
+```sql
+-- Net position per instrument
+SELECT symbol, SUM(volume) AS units FROM trades GROUP BY symbol;
+
+-- Net cash impact, fees included
+SELECT SUM(cost) - SUM(fee) AS net_cash FROM trades;
+```
+
+`side` remains authoritative for direction and is always consistent with the sign — it is not redundant, since a zero-volume trade carries no sign.
+
+**Two caveats.**
+
+1. **`SUM(volume)` is net units transacted through RelayPort, not a custody-accurate holding.** Stock splits, transfers in/out, and option assignment or exercise all move a real position without ever producing a fill. Don't reconcile a broker statement against it.
+2. **Never sum across asset classes.** An option's `volume` is denominated in *contracts*, and one contract covers `multiplier` (typically 100) shares. Group by `symbol` — OCC tickers keep option series distinct from their underlying.
+
+Normalization happens once, at the model boundary in [`services/shared/models.py`](services/shared/models.py), never in the individual adapters. Brokers disagree wildly — IBKR Flex signs `quantity` the same way RelayPort does but reports `cost` as an inverted *cost-basis* delta, while the IBKR bridge, Kraken REST, and Kraken WS all send unsigned magnitudes — and enforcing centrally means a new adapter cannot introduce yet another convention.
 
 ### Option contracts
 
@@ -516,7 +546,7 @@ Example — IBKR option trade (AVGO call, sold via Flex):
       "side": "sell",
       "orderType": "limit",
       "price": 5.2,
-      "volume": 1.0,
+      "volume": -1.0,
       "cost": 520.0,
       "fee": 0.65,
       "fillCount": 1,
@@ -781,7 +811,7 @@ In short: enabling the listener trades fee accuracy for latency. If your consume
       "orderType": "limit",
       "price": 2450.5,
       "volume": 0.5,
-      "cost": 1225.25,
+      "cost": -1225.25,
       "fee": 0.32,
       "fillCount": 1,
       "execIds": ["TID-XXXXX-XXXXX"],

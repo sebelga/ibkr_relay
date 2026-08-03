@@ -283,6 +283,10 @@ def parse_fills(
                     side=side,
                     orderType=normalize_order_type(str(raw.get("orderType", ""))),
                     price=float(raw.get("price", 0.0)),
+                    # Forwarded as reported — Fill re-signs both from `side`.
+                    # Flex signs `quantity` the way we do (buy +, sell -) but
+                    # reports `cost` as a cost-basis delta (buy +, sell -),
+                    # which is inverted relative to our cash-delta convention.
                     volume=float(raw.get("quantity", 0.0)),
                     cost=float(raw.get("cost", 0.0)),
                     fee=abs(float(raw.get("commission", 0.0))),

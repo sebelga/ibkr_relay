@@ -294,6 +294,29 @@ class TestMapFill(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Unknown execution side"):
             _map_fill(_make_envelope(side="UNKNOWN"), _TEST_TZ)
 
+    def test_sell_volume_is_negative(self) -> None:
+        """Regression: the bridge emitted `sell` with a POSITIVE volume.
+
+        ib_async reports `Execution.shares` as an unsigned magnitude, so
+        this path disagreed with the Flex path (which signs sells negative)
+        for the same execution — the bug that shipped a positive-volume
+        sell webhook to consumers. Both paths must now agree.
+        """
+        fill = _map_fill(_make_envelope(side="SLD"), _TEST_TZ)
+        self.assertEqual(fill.side, BuySell.SELL)
+        self.assertLess(fill.volume, 0)
+        self.assertAlmostEqual(fill.volume, -100.0)
+
+    def test_sell_cost_is_positive(self) -> None:
+        """Selling receives cash → positive cost, opposite sign to volume."""
+        fill = _map_fill(_make_envelope(side="SLD"), _TEST_TZ)
+        self.assertGreater(fill.cost, 0)
+        self.assertAlmostEqual(fill.cost, 150.25 * 100.0)
+
+    def test_buy_volume_is_positive(self) -> None:
+        fill = _map_fill(_make_envelope(side="BOT"), _TEST_TZ)
+        self.assertAlmostEqual(fill.volume, 100.0)
+
     def test_empty_exec_id_raises(self) -> None:
         with self.assertRaisesRegex(ValueError, "Empty execId"):
             _map_fill(_make_envelope(exec_id=""), _TEST_TZ)
@@ -479,12 +502,13 @@ class TestOptionMapFill(unittest.TestCase):
         envelope = _envelope_with_contract(_option_contract())
         envelope.fill.execution = envelope.fill.execution.model_copy(update={"shares": 2.0})
         fill = _map_fill(envelope, _TEST_TZ)
-        self.assertAlmostEqual(fill.cost, 150.25 * 2.0 * 100)
+        # Negative: these envelopes are BUYs, so cost is a cash outflow.
+        self.assertAlmostEqual(fill.cost, -(150.25 * 2.0 * 100))
 
     def test_equity_cost_excludes_multiplier(self) -> None:
         # Equity fills must not apply the option multiplier.
         fill = _map_fill(_make_envelope(), _TEST_TZ)
-        self.assertAlmostEqual(fill.cost, 150.25 * 100.0)
+        self.assertAlmostEqual(fill.cost, -(150.25 * 100.0))
 
     def test_non_integer_multiplier_raises(self) -> None:
         with self.assertRaisesRegex(ValueError, "Non-integer contract multiplier"):

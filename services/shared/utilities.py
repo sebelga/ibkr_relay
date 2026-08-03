@@ -9,9 +9,17 @@ from .models import Fill, Trade
 def aggregate_fills(fills: list[Fill]) -> list[Trade]:
     """Group fills by ``(orderId, symbol)`` and compute aggregated Trades.
 
-    * ``volume`` — sum of all fills.
-    * ``price`` — quantity-weighted average (VWAP).
-    * Financial fields (cost, fee) — summed.
+    * ``volume`` — sum of all fills. Signed (see the sign convention on
+      :class:`~shared.models.Fill`), so summing preserves direction: a
+      three-fill sell aggregates to a single negative volume.
+    * ``price`` — quantity-weighted average (VWAP). Weighted by
+      ``abs(volume)``, never the signed value: on a sell the signs would
+      otherwise cancel between numerator and denominator, and a mixed-sign
+      group would divide by a near-zero total. ``price`` stays a positive
+      magnitude on both sides.
+    * Financial fields (cost, fee) — summed. ``cost`` is signed and sums to
+      the trade's net cash delta; ``fee`` is unsigned and sums to total
+      fees paid.
     * ``timestamp`` — latest fill's value (lexicographic max).
     * ``execIds`` — execId per fill.
     * ``fillCount`` — number of fills in the group.

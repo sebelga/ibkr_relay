@@ -15,6 +15,11 @@ export type RelayName = "ibkr" | "kraken";
 
 /**
  * Aggregated trade (one or more fills for the same order).
+ *
+ * Carries the same signed-delta convention as :class:`Fill` — see the
+ * "Sign convention" table there. ``volume`` / ``cost`` / ``fee`` are the
+ * sums of the constituent fills, so the convention survives aggregation
+ * unchanged and a stream of Trades folds into a position by ``SUM``.
  */
 export interface Trade {
   orderId: string;
@@ -56,6 +61,36 @@ export interface OptionContract {
 }
 /**
  * Individual execution from a broker (CommonFill spec).
+ *
+ * **Sign convention (PUBLIC CONTRACT).** RelayPort deliberately departs
+ * from the FIX/exchange norm of "unsigned magnitude + side flag". Here
+ * ``volume`` and ``cost`` are *signed deltas*, so consumers can fold a
+ * stream of trades into a position with a plain ``SUM``:
+ *
+ * ===========  ===========================  ========  ========
+ * Field        Meaning                      Buy       Sell
+ * ===========  ===========================  ========  ========
+ * ``volume``   position delta (units)       positive  negative
+ * ``cost``     cash delta (currency)        negative  positive
+ * ``fee``      amount paid (always a debit) positive  positive
+ * ``price``    unit price (never signed)    positive  positive
+ * ===========  ===========================  ========  ========
+ *
+ * So ``SUM(volume)`` grouped by ``symbol`` yields the net position, and
+ * ``SUM(cost) - SUM(fee)`` yields the net cash impact.
+ *
+ * Two caveats consumers must know. (1) ``SUM(volume)`` is *net units
+ * transacted through RelayPort*, not a custody-accurate holding — splits,
+ * transfers, and option assignment/exercise move a real position without
+ * ever producing a fill. (2) Never sum across asset classes: an option's
+ * ``volume`` is in contracts, and one contract covers ``multiplier``
+ * (typically 100) shares. Group by ``symbol`` — OCC tickers keep option
+ * series distinct from their underlying.
+ *
+ * ``side`` remains authoritative for direction and is always consistent
+ * with the sign; it is not redundant, since a zero-volume fill carries no
+ * sign. Signs are enforced by :func:`_apply_sign_convention`, never by
+ * the adapters, so a broker's native convention cannot leak out.
  */
 export interface Fill {
   execId: string;

@@ -199,7 +199,8 @@ class TestParseRestTrade(unittest.TestCase):
         self.assertEqual(fill.assetClass, "crypto")
         self.assertEqual(fill.price, 65000.0)
         self.assertEqual(fill.volume, 0.1)
-        self.assertEqual(fill.cost, 6500.0)
+        # Fixture is a BUY → positive volume, negative cost.
+        self.assertEqual(fill.cost, -6500.0)
         self.assertEqual(fill.fee, 6.5)
         self.assertEqual(fill.source, "rest_poll")
 

@@ -326,6 +326,8 @@ def _map_fill(envelope: WsFillEnvelope, tz: ZoneInfo) -> Fill:
         side=side,
         orderType=None,  # WS events don't carry order type info
         price=ex.price,
+        # ib_async reports `shares` as an unsigned magnitude with direction
+        # only on `ex.side`; both fields are re-signed by Fill.
         volume=ex.shares,
         cost=ex.price * ex.shares * multiplier,
         fee=abs(cr.commission),  # Always positive (amount paid)

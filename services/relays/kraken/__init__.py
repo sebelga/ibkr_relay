@@ -99,6 +99,8 @@ def _parse_rest_trade(txid: str, data: KrakenRestTrade) -> Fill:
         side=side,
         orderType=order_type,
         price=require_float(data, "price", ctx),
+        # Kraken REST reports unsigned magnitudes with direction only on
+        # `type`; both fields are re-signed by Fill.
         volume=require_float(data, "vol", ctx),
         cost=require_float(data, "cost", ctx),
         fee=abs(require_float(data, "fee", ctx)),
