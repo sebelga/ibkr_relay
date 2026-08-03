@@ -29,6 +29,14 @@ For `assetCategory == "OPT"` fills:
 - `strike`, `expiryDate` (via `flex_date_to_iso()`), and `type` (`"call"`/`"put"` from the `putCall` attribute) are required. Rows with missing or invalid option metadata are skipped with a parse error.
 - **`Fill.cost` magnitude = `price × volume × contract.multiplier`** (bridge path) — options are priced per share; each contract covers `multiplier` shares (standard = 100). `_map_fill` parses `WsContract.multiplier` as `int`; a non-integer or non-positive value raises `ValueError` and is surfaced as a webhook parse error. Equity fills use `multiplier = 1` so the formula is uniform. This computes the **magnitude only** — the sign is applied afterwards by `Fill` (negative on buy, positive on sell; see `relays.instructions.md`), so `_map_fill` must not sign it. The multiplier does not apply to the Flex path (IBKR pre-calculates `cost` in the XML), but Flex is subject to the same re-signing: it reports `cost` as an inverted cost-basis delta.
 
+## Book-trade classification (`_book_trade_key`)
+
+Implements the cross-path dedup contract from `relays.instructions.md`:
+
+- **Flex path**: `raw["transactionType"] == "BookTrade"` (primary — verified on live assignment rows; normal fills carry `ExchTrade`), falling back to exact-token intersection of `raw["notes"]` (Activity Flex) / `raw["code"]` (Trade Confirmation) with `{A, Ex, Ep, AEx, MEx, GEA}`. Tokens are split on `;` and matched exactly — substring matching would confuse `A` with `Adj`/`Al`/`Aw` and `Ex` with `AEx`. Both columns are user-selected in the Flex query config; a query without them fails open to duplicate webhooks (documented in README).
+- **Bridge path**: the `isBookTrade` envelope field, set by ibkr_bridge for reconciled executions that never received a CommissionReport. Do NOT classify on `lastLiquidity == 2147483647` — that is TWS `UNSET_INTEGER` ("no data"), not an assignment marker.
+- Account comes from `raw["accountId"]` (Flex) / `raw["fill"]["execution"]["acctNumber"]` (bridge envelope dump); missing account → `None` (fail open, never an account-blind key).
+
 ## Combo (multi-leg / BAG) orders
 
 - **`_map_fill` skips `secType == "BAG"` executions** (bridge path). IBKR emits a synthetic "combo summary" execution for multi-leg orders — reported under the *underlying* symbol, with zero commission and the parent order's `permId`. It is not a tradeable leg (the real legs arrive as their own executions), and it shares the legs' `permId` (→ `Fill.orderId`). Left in, it would (1) fire a phantom underlying-symbol webhook and (2) merge with the legs in `aggregate_fills`. The Flex path never sees it (IBKR omits the combo leg from Flex reports).

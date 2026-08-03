@@ -10,7 +10,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from relay_core.notifier.base import BaseNotifier as BaseNotifier
-from shared import RelayName
+from shared import Fill, RelayName
 
 # Re-export domain types so consumers can do ``from relay_core import X``.
 from .listener_engine import (
@@ -60,6 +60,14 @@ class BrokerRelay:
     # Lifecycle hook — called by the orchestrator before the event loop starts.
     # Relay adapters use this to register cross-cutting concerns (e.g. log filters).
     on_start: Callable[["StartupContext"], None] | None = None
+
+    # Book-trade classifier for cross-path dedup (see relay_core.dedup).
+    # Returns an account-scoped economic key for fills the broker books
+    # outside normal execution flow (option assignment/exercise/expiry),
+    # which reach both engines with disjoint identifiers; None for every
+    # other fill. None here (the default) disables the layer entirely.
+    # Keys embed the account id — engines must never log them.
+    book_trade_key: Callable[[Fill], str | None] | None = None
 
     # Runtime state (set by the orchestrator, not by the adapter)
     poll_locks: list[asyncio.Lock] = field(default_factory=list)
