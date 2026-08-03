@@ -433,7 +433,7 @@ When orders fill, the relay POSTs a JSON payload with all trades batched into a 
       "orderType": "market",
       "price": 254.6,
       "volume": 1.0,
-      "cost": 254.6,
+      "cost": -254.6,
       "fee": 1.0,
       "fillCount": 1,
       "execIds": ["0001f4e8.67890abc.01.01"],
@@ -474,7 +474,7 @@ All broker adapters use the same **CommonFill** model. The `data` array contains
 | `orderType`    | `OrderType \| null`      | Normalized: `"market"`, `"limit"`, `"stop"`, `"stop_limit"`, `"trailing_stop"`, or `null`                                                                              |
 | `price`        | `number`                 | VWAP when aggregated, single fill price otherwise. Always a positive magnitude — never signed (see [Sign convention](#sign-convention))                                |
 | `volume`       | `number`                 | Sum of fill quantities, **signed**: positive on buy, negative on sell (see [Sign convention](#sign-convention))                                                        |
-| `cost`         | `number`                 | Total cost (sum of fills), **signed**: negative on buy, positive on sell (see [Sign convention](#sign-convention))                                                     |
+| `cost`         | `number`                 | Net cash delta (sum of fills), **signed**: negative on buy (money out), positive on sell (money in) (see [Sign convention](#sign-convention))                          |
 | `fee`          | `number`                 | Total fees/commissions — always positive (amount paid), never signed                                                                                                   |
 | `fillCount`    | `number`                 | Number of fills aggregated into this trade                                                                                                                             |
 | `execIds`      | `string[]`               | One execution ID per fill (for tracing back to individual fills)                                                                                                       |
@@ -546,7 +546,7 @@ Example — IBKR option trade (AVGO call, sold via Flex):
       "side": "sell",
       "orderType": "limit",
       "price": 5.2,
-      "volume": 1.0,
+      "volume": -1.0,
       "cost": 520.0,
       "fee": 0.65,
       "fillCount": 1,
@@ -811,7 +811,7 @@ In short: enabling the listener trades fee accuracy for latency. If your consume
       "orderType": "limit",
       "price": 2450.5,
       "volume": 0.5,
-      "cost": 1225.25,
+      "cost": -1225.25,
       "fee": 0.32,
       "fillCount": 1,
       "execIds": ["TID-XXXXX-XXXXX"],
