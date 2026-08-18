@@ -18,6 +18,12 @@ log = logging.getLogger("notifier.webhook")
 _DEBUG_SERVICE_NAME = "debug"
 _DEBUG_SERVICE_PORT = 9000
 
+# Generous read budget: receivers that only ack after processing (or that
+# sit on a cold-started serverless runtime) can take well over 10s to
+# respond even though they accepted the request. A premature read timeout
+# is counted as a delivery failure and triggers a duplicate re-send.
+_TIMEOUT = httpx.Timeout(10.0, read=30.0)
+
 
 # ---------------------------------------------------------------------------
 # Env var getters — single source of truth, .strip() applied once
@@ -133,6 +139,11 @@ class WebhookNotifier(BaseNotifier):
             "Content-Type": "application/json",
             "X-Signature-256": f"sha256={signature}",
         }
+        # Content-derived, stable across retries and re-sends of the same
+        # trades — receivers deduplicate on it (delivery is at-least-once).
+        delivery_id = getattr(payload, "deliveryId", None)
+        if isinstance(delivery_id, str) and delivery_id:
+            headers["X-Delivery-Id"] = delivery_id
         if self._header_name:
             headers[self._header_name] = self._header_value
 
@@ -140,7 +151,7 @@ class WebhookNotifier(BaseNotifier):
             self._url,
             content=body,
             headers=headers,
-            timeout=10.0,
+            timeout=_TIMEOUT,
         )
         try:
             resp.raise_for_status()

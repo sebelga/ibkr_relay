@@ -15,7 +15,7 @@ Currently supports **IBKR** (Interactive Brokers) via the Flex Web Service and *
 
 - **A relay engine** that checks for trade fills and sends them to your webhook URL via a common payload format
 - **Automatic HTTPS** via Caddy + Let's Encrypt
-- **SQLite dedup** so each fill is delivered exactly once
+- **SQLite dedup** so each fill is delivered once under normal operation (at-least-once overall — see [Delivery semantics](#delivery-semantics))
 - **A debug webhook inbox** for testing without hitting production services
 - **Multi-account support** within each broker adapter
 - **Optional real-time listeners** — IBKR via [ibkr_bridge](https://github.com/tradegist/ibkr_bridge) WebSocket, Kraken via native WS v2 executions channel
@@ -33,6 +33,7 @@ Currently supports **IBKR** (Interactive Brokers) via the Flex Web Service and *
 - [Configuration](#configuration)
 - [Webhook Payload](#webhook-payload)
   - [Option contracts](#option-contracts)
+  - [Handling Webhooks in Your Consumer](#handling-webhooks-in-your-consumer)
   - [FX Rate Enrichment](#fx-rate-enrichment)
   - [Debug Webhook Inbox](#debug-webhook-inbox)
   - [Operational Alerts](#operational-alerts)
@@ -313,7 +314,7 @@ Four containers in a single Docker network (debug is optional):
 - **`market_data`** — Market data lookup service. Exposes a REST API for dividend information via Yahoo Finance. Protected by its own Bearer token (`MD_API_TOKEN`), separate from the relay API token.
 - **`debug`** — Optional debug webhook inbox. Captures webhook payloads for inspection during development. Enabled when `DEBUG_WEBHOOK_PATH` is set.
 
-> **Dedup guarantee.** The relay uses a SQLite dedup database so each fill is delivered at most once under normal operation. In the rare event of an internal crash between webhook delivery and dedup bookkeeping, a fill may be sent a second time. Design your webhook consumer to be idempotent (e.g. deduplicate on `execId`).
+> **Delivery semantics.** <a name="delivery-semantics"></a> Delivery is **at-least-once**, never at-most-once. A fill is marked processed only *after* the webhook succeeds (mark-after-notify) — the deliberate trade-off is that a genuinely failed delivery is retried rather than silently lost, so any failure the relay cannot distinguish from non-delivery produces a duplicate instead. The common trigger is a slow receiver: if your endpoint accepts the request but responds after the read timeout, the relay counts the attempt as failed and re-sends — each retry and each next-cycle re-send is a duplicate on your side. **Design your webhook consumer to be idempotent**: deduplicate on the `deliveryId` field / `X-Delivery-Id` header — identical across retries and re-sends of the same trades. Full checklist with code examples: [Handling Webhooks in Your Consumer](#handling-webhooks-in-your-consumer).
 
 ## Domains & HTTPS
 
@@ -424,6 +425,7 @@ When orders fill, the relay POSTs a JSON payload with all trades batched into a 
 {
   "relay": "ibkr",
   "type": "trades",
+  "deliveryId": "a3f8c91d2e074b56",
   "data": [
     {
       "orderId": "684196618",
@@ -460,6 +462,8 @@ When orders fill, the relay POSTs a JSON payload with all trades batched into a 
 ```
 
 The envelope uses a discriminated union pattern — `relay` identifies the broker and `type` identifies the event kind. Consumers should type their variables as `WebhookPayload` (the union). Currently the only variant is `WebhookPayloadTrades` (`type: "trades"`); new event types (e.g. orders, positions) will be added as new variants.
+
+`deliveryId` is a **content-derived dedup key** (also sent as the `X-Delivery-Id` header): a hash of the relay plus each trade's `orderId` and `execIds`. It is deliberately independent of prices, volumes, and timestamps, so retry attempts and next-cycle re-sends of the same trades carry the **same** `deliveryId` — deduplicate on it to make your consumer idempotent (see [Delivery semantics](#delivery-semantics) and the [known gap](#a-known-gap-you-can-safely-ignore) for brokers whose real-time and polling paths report different execution identifiers).
 
 ### CommonFill Contract
 
@@ -538,6 +542,7 @@ Example — IBKR option trade (AVGO call, sold via Flex):
 {
   "relay": "ibkr",
   "type": "trades",
+  "deliveryId": "9c4e12ab7d3f8016",
   "data": [
     {
       "orderId": "684196620",
@@ -569,6 +574,11 @@ Example — IBKR option trade (AVGO call, sold via Flex):
 
 Rows with `assetClass == "option"` where option metadata is missing or invalid are skipped and surfaced in the `errors` array rather than emitted with an incomplete `option` object. This means any trade that reaches your webhook with `assetClass == "option"` is guaranteed to have a non-null `option` field — the invariant is enforced by the parsers rather than by the type schema (which models `option` as `OptionContract | null` to cover non-option assets).
 
+Each request carries two relay-set headers:
+
+- **`X-Delivery-Id`** — the payload's `deliveryId`, exposed as a header so receivers can dedupe before parsing the body.
+- **`X-Signature-256`** — HMAC-SHA256 of the body.
+
 The payload is signed with HMAC-SHA256. Verify using the `X-Signature-256` header:
 
 ```python
@@ -588,6 +598,82 @@ assert(headerValue === `sha256=${expected}`);
 ```
 
 If `TARGET_WEBHOOK_URL` is empty, the relay logs the payload to stdout (dry-run mode) instead of sending it.
+
+### Handling Webhooks in Your Consumer
+
+Process every incoming request in this order: **verify → dedupe → process → respond**. Verification comes first because the other steps trust the payload; respond within the relay's 30s read budget (acking only after processing is fine — see [Delivery semantics](#delivery-semantics)).
+
+#### 1. Verify `X-Signature-256`
+
+Compute the HMAC over the **raw request bytes**, before any JSON parsing — the relay serialises with `indent=2`, so re-serialising a parsed object (`JSON.stringify`) will not round-trip byte-identically and the signature will never match. Use a constant-time comparison, never `===`:
+
+```ts
+// TypeScript (Node)
+import { createHmac, timingSafeEqual } from "node:crypto";
+
+function verifySignature(
+  rawBody: Buffer,
+  header: string | undefined,
+  secret: string,
+): boolean {
+  if (!header?.startsWith("sha256=")) return false;
+  const expected = createHmac("sha256", secret).update(rawBody).digest();
+  const received = Buffer.from(header.slice("sha256=".length), "hex");
+  return received.length === expected.length && timingSafeEqual(received, expected);
+}
+
+// Express: keep the body raw until after verification
+app.post("/webhook", express.raw({ type: "application/json" }), (req, res) => {
+  if (!verifySignature(req.body, req.header("X-Signature-256"), process.env.WEBHOOK_SECRET!)) {
+    return res.status(401).json({ error: "invalid signature" });
+  }
+  const payload = JSON.parse(req.body.toString("utf8"));
+  // ... dedupe (step 2), then process
+  return res.status(200).json({ ok: true });
+});
+```
+
+#### 2. Deduplicate on `X-Delivery-Id`
+
+Retries and next-cycle re-sends of the same trades carry the identical `X-Delivery-Id`, so a keyed lookup collapses them. In Pipedream, attach a [Data Store](https://pipedream.com/docs/data-stores) to a Node.js code step placed right after the HTTP trigger:
+
+```js
+// Pipedream code step — dedupe on X-Delivery-Id
+export default defineComponent({
+  props: {
+    db: { type: "data_store" },
+  },
+  async run({ steps, $ }) {
+    const deliveryId = steps.trigger.event.headers["x-delivery-id"];
+    if (!deliveryId) return; // header absent (older relay version) — process normally
+
+    const key = `delivery:${deliveryId}`;
+    if (await this.db.has(key)) {
+      // A duplicate is a success from the relay's perspective — ack it
+      // BEFORE exiting. $.flow.exit() skips every remaining step,
+      // including a trailing HTTP-response step; on a custom-response
+      // trigger the relay would then receive an error, count the
+      // delivery as failed, and re-send the same duplicate every cycle.
+      await $.respond({ status: 200, body: { ok: true, duplicate: true } });
+      return $.flow.exit(`duplicate delivery ${deliveryId} — skipping`);
+    }
+    // TTL (seconds): 7 days comfortably outlives retries and re-sends
+    // while keeping the store from growing forever.
+    await this.db.set(key, new Date().toISOString(), { ttl: 60 * 60 * 24 * 7 });
+  },
+});
+```
+
+**When to mark the delivery as seen.** The step above records the delivery ID *before* the processing steps run. Whether that ordering is correct depends on the trigger's **HTTP Response** setting:
+
+- **"Return HTTP 200 OK immediately" (Pipedream's default)** — the relay is acked before any step runs, so it never retries a mid-workflow crash. Marking early costs nothing (there is no retry to lose), but a crashed run loses the trade with no recovery path.
+- **"Return a custom response from your workflow"** (`$.respond()` / trailing HTTP-response step) — a mid-workflow crash sends no response, so the relay counts the delivery as failed and re-sends it: that retry is your safety net. Keep the `db.has` check at the top, but move the `db.set` to the **end** of the workflow, after processing succeeds. If you mark early, the re-send of a crashed run is dropped as a "duplicate" and the trade is lost — the consumer-side twin of the relay's own mark-after-notify rule: record "done" only after the work is done. (The final step rebuilds the key from `steps.trigger.event.headers["x-delivery-id"]` — trigger data is visible from every step — or reads it from the dedup step's `$return_value`; attach the same Data Store prop to that step.)
+
+#### A known gap you can safely ignore
+
+`deliveryId` is derived from the broker's execution identifiers, and some brokers report **different identifiers on their real-time (WS) and polling (REST) paths** for the same order. On such brokers, a failure-path re-send — a delivery that reached you but looked failed to the relay, later re-sent by the poller — can carry a *different* `deliveryId`, which step 2 won't catch.
+
+The relay already suppresses this server-side (execution-id dedup, order-level dedup, and in-flight deferral), so it can only slip through on a narrow failure path. If a duplicate ever matters enough to close this gap, deduplicate on `data[].orderId` within a window of roughly twice the poll interval — but implement it carefully: a too-eager `orderId` check silently drops legitimate later fills for the same order, which is worse than the duplicate it prevents. For most consumers, the right call is to accept the rare duplicate.
 
 ### FX Rate Enrichment
 
@@ -796,12 +882,15 @@ Practical consequences when both `KRAKEN_LISTENER_ENABLED=true` and `KRAKEN_POLL
 
 In short: enabling the listener trades fee accuracy for latency. If your consumer needs fees, run poller-only with a shorter `KRAKEN_POLL_INTERVAL`.
 
+The "one webhook" outcomes above describe successful deliveries. While the listener's webhook is still in flight (nothing is marked until it succeeds), the poller defers that order's fills to its next cycle via an in-process in-flight registry rather than double-sending. If a delivery fails or times out, at-least-once semantics apply — see [Delivery semantics](#delivery-semantics).
+
 ### Webhook payload example (Kraken)
 
 ```json
 {
   "relay": "kraken",
   "type": "trades",
+  "deliveryId": "5b0d77e4c2a1f938",
   "data": [
     {
       "orderId": "OXXXXX-XXXXX-XXXXXX",

@@ -214,6 +214,10 @@
           "default": "trades",
           "type": "string"
         },
+        "deliveryId": {
+          "default": "",
+          "type": "string"
+        },
         "data": {
           "items": {
             "$ref": "#/$defs/Trade"
@@ -231,7 +235,8 @@
         "relay",
         "data",
         "errors",
-        "type"
+        "type",
+        "deliveryId"
       ],
       "title": "WebhookPayloadTrades",
       "type": "object"

@@ -7,12 +7,17 @@ from unittest.mock import MagicMock, patch
 import pytest
 from pydantic import BaseModel
 
-from relay_core.notifier.webhook import WebhookNotifier
+from relay_core.notifier.webhook import _TIMEOUT, WebhookNotifier
 
 
 class _SamplePayload(BaseModel):
     symbol: str
     quantity: int
+
+
+class _PayloadWithDeliveryId(BaseModel):
+    symbol: str
+    deliveryId: str
 
 
 class TestWebhookNotifier:
@@ -66,6 +71,58 @@ class TestWebhookNotifier:
 
         headers = mock_post.call_args.kwargs["headers"]
         assert headers["X-Custom"] == "my-value"
+
+    @patch("notifier.webhook.httpx.post")
+    def test_delivery_id_header_sent(self, mock_post: MagicMock) -> None:
+        """Payloads carrying deliveryId expose it as X-Delivery-Id so
+        receivers can dedupe without parsing the body."""
+        mock_post.return_value = MagicMock(status_code=200)
+        env = {
+            "TARGET_WEBHOOK_URL": "https://example.com/hook",
+            "WEBHOOK_SECRET": "s",
+        }
+        with patch.dict("os.environ", env, clear=True):
+            notifier = WebhookNotifier()
+
+        notifier.send(_PayloadWithDeliveryId(symbol="AAPL", deliveryId="abc123"))
+
+        headers = mock_post.call_args.kwargs["headers"]
+        assert headers["X-Delivery-Id"] == "abc123"
+
+    @patch("notifier.webhook.httpx.post")
+    def test_no_delivery_id_header_without_field(self, mock_post: MagicMock) -> None:
+        mock_post.return_value = MagicMock(status_code=200)
+        env = {
+            "TARGET_WEBHOOK_URL": "https://example.com/hook",
+            "WEBHOOK_SECRET": "s",
+        }
+        with patch.dict("os.environ", env, clear=True):
+            notifier = WebhookNotifier()
+
+        notifier.send(_SamplePayload(symbol="AAPL", quantity=1))
+
+        headers = mock_post.call_args.kwargs["headers"]
+        assert "X-Delivery-Id" not in headers
+
+    @patch("notifier.webhook.httpx.post")
+    def test_generous_read_timeout(self, mock_post: MagicMock) -> None:
+        """Read budget must exceed the default 10s — receivers that ack only
+        after processing (or cold-start) otherwise time out on successful
+        deliveries, turning each into a duplicate re-send."""
+        mock_post.return_value = MagicMock(status_code=200)
+        env = {
+            "TARGET_WEBHOOK_URL": "https://example.com/hook",
+            "WEBHOOK_SECRET": "s",
+        }
+        with patch.dict("os.environ", env, clear=True):
+            notifier = WebhookNotifier()
+
+        notifier.send(_SamplePayload(symbol="AAPL", quantity=1))
+
+        timeout = mock_post.call_args.kwargs["timeout"]
+        assert timeout is _TIMEOUT
+        assert timeout.read == 30.0
+        assert timeout.connect == 10.0
 
     @patch("notifier.webhook.httpx.post")
     def test_network_error_raises(self, mock_post: MagicMock) -> None:
