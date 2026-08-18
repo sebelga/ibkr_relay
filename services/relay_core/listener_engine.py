@@ -24,6 +24,7 @@ from relay_core.dedup import (
 from relay_core.dedup import init_db as _init_dedup_db
 from relay_core.env import get_env, get_env_int
 from relay_core.fx import enrich_if_enabled
+from relay_core.inflight import INFLIGHT_ORDERS
 from relay_core.notifier import notify
 from relay_core.notifier.audit import log_fills
 from relay_core.notifier.models import WebhookPayloadTrades
@@ -192,26 +193,34 @@ def _send_and_mark(
 
         # Mark-after-notify: notify then mark (never reversed).
         # If notify raises NotificationError, mark is skipped.
+        # While notify is in flight nothing is marked yet, so the orders
+        # are registered in the in-flight registry — a concurrent poll
+        # cycle defers them instead of sending a duplicate webhook.
         payload = WebhookPayloadTrades(relay=relay_name, data=trades, errors=all_errors)
-        notify(
-            relay.notifiers, payload,
-            retries=relay.notify_retries,
-            retry_delay_ms=relay.notify_retry_delay_ms,
-            relay_name=relay_name,
-        )
+        in_flight_orders = {t.orderId for t in trades}
+        INFLIGHT_ORDERS.register(relay_name, in_flight_orders)
+        try:
+            notify(
+                relay.notifiers, payload,
+                retries=relay.notify_retries,
+                retry_delay_ms=relay.notify_retry_delay_ms,
+                relay_name=relay_name,
+            )
 
-        # Mark processed AFTER notify (relay-prefixed keys + orderId).
-        # The orderId lets the poller suppress duplicate webhooks for
-        # multi-match fills where the broker issues a different
-        # consolidated identifier on its REST path.
-        if trades:
-            items = [
-                (f"{relay_name}:{eid}", t.orderId)
-                for t in trades
-                for eid in t.execIds
-            ]
-            mark_processed_batch_with_orders(conn, items)
-            log.info("Marked %d fill(s) as processed", len(items))
+            # Mark processed AFTER notify (relay-prefixed keys + orderId).
+            # The orderId lets the poller suppress duplicate webhooks for
+            # multi-match fills where the broker issues a different
+            # consolidated identifier on its REST path.
+            if trades:
+                items = [
+                    (f"{relay_name}:{eid}", t.orderId)
+                    for t in trades
+                    for eid in t.execIds
+                ]
+                mark_processed_batch_with_orders(conn, items)
+                log.info("Marked %d fill(s) as processed", len(items))
+        finally:
+            INFLIGHT_ORDERS.release(relay_name, in_flight_orders)
     finally:
         conn.close()
 

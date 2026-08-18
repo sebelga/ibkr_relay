@@ -16,6 +16,7 @@ export type BuySell = "buy" | "sell";
 export interface WebhookPayloadTrades {
   relay: RelayName;
   type: "trades";
+  deliveryId: string;
   data: Trade[];
   errors: string[];
 }

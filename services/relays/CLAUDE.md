@@ -71,6 +71,6 @@ If the broker supports option derivatives, populate `Fill.option` (type `OptionC
 
 ## Listener/poller dedup interaction
 
-When both `LISTENER_ENABLED` and `POLLER_ENABLED` are true for the same relay, the same fill can reach the consumer through both paths. The engine reconciles in two layers (see [services/relay_core/CLAUDE.md](../relay_core/CLAUDE.md) for the implementation): exec_id dedup (always on) and order-level dedup (listener-side write, 2× POLL_INTERVAL window).
+When both `LISTENER_ENABLED` and `POLLER_ENABLED` are true for the same relay, the same fill can reach the consumer through both paths. The engine reconciles in three layers (see [services/relay_core/CLAUDE.md](../relay_core/CLAUDE.md) for the implementation): exec_id dedup (always on), order-level dedup (listener-side write, 2× POLL_INTERVAL window), and in-flight deferral (the poller defers orders whose listener notify is still in progress — covers the window before anything is marked).
 
 When designing a new relay, verify experimentally whether the broker reuses identifiers across paths. If not (Kraken-style), the order-level dedup will suppress the poller's fee-bearing webhook for that order — document the fee trade-off in the README. If your broker's listener does not reliably include fees in real time, consider recommending poller-only mode (with a shorter `{RELAY}_POLL_INTERVAL`) as the fee-accurate option.

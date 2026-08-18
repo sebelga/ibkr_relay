@@ -15,7 +15,7 @@ Currently supports **IBKR** (Interactive Brokers) via the Flex Web Service and *
 
 - **A relay engine** that checks for trade fills and sends them to your webhook URL via a common payload format
 - **Automatic HTTPS** via Caddy + Let's Encrypt
-- **SQLite dedup** so each fill is delivered exactly once
+- **SQLite dedup** so each fill is delivered once under normal operation (at-least-once overall — see [Delivery semantics](#delivery-semantics))
 - **A debug webhook inbox** for testing without hitting production services
 - **Multi-account support** within each broker adapter
 - **Optional real-time listeners** — IBKR via [ibkr_bridge](https://github.com/tradegist/ibkr_bridge) WebSocket, Kraken via native WS v2 executions channel
@@ -313,7 +313,7 @@ Four containers in a single Docker network (debug is optional):
 - **`market_data`** — Market data lookup service. Exposes a REST API for dividend information via Yahoo Finance. Protected by its own Bearer token (`MD_API_TOKEN`), separate from the relay API token.
 - **`debug`** — Optional debug webhook inbox. Captures webhook payloads for inspection during development. Enabled when `DEBUG_WEBHOOK_PATH` is set.
 
-> **Dedup guarantee.** The relay uses a SQLite dedup database so each fill is delivered at most once under normal operation. In the rare event of an internal crash between webhook delivery and dedup bookkeeping, a fill may be sent a second time. Design your webhook consumer to be idempotent (e.g. deduplicate on `execId`).
+> **Delivery semantics.** <a name="delivery-semantics"></a> Delivery is **at-least-once**, never at-most-once. A fill is marked processed only *after* the webhook succeeds (mark-after-notify) — the deliberate trade-off is that a genuinely failed delivery is retried rather than silently lost, so any failure the relay cannot distinguish from non-delivery produces a duplicate instead. The common trigger is a slow receiver: if your endpoint accepts the request but responds after the read timeout, the relay counts the attempt as failed and re-sends — each retry and each next-cycle re-send is a duplicate on your side. **Design your webhook consumer to be idempotent**: deduplicate on the `deliveryId` field / `X-Delivery-Id` header (identical across retries and re-sends of the same trades), falling back to `data[].orderId` within a short window for the cross-path case where the listener and poller batch the same order differently.
 
 ## Domains & HTTPS
 
@@ -424,6 +424,7 @@ When orders fill, the relay POSTs a JSON payload with all trades batched into a 
 {
   "relay": "ibkr",
   "type": "trades",
+  "deliveryId": "a3f8c91d2e074b56",
   "data": [
     {
       "orderId": "684196618",
@@ -460,6 +461,8 @@ When orders fill, the relay POSTs a JSON payload with all trades batched into a 
 ```
 
 The envelope uses a discriminated union pattern — `relay` identifies the broker and `type` identifies the event kind. Consumers should type their variables as `WebhookPayload` (the union). Currently the only variant is `WebhookPayloadTrades` (`type: "trades"`); new event types (e.g. orders, positions) will be added as new variants.
+
+`deliveryId` is a **content-derived dedup key** (also sent as the `X-Delivery-Id` header): a hash of the relay plus each trade's `orderId` and `execIds`. It is deliberately independent of prices, volumes, and timestamps, so retry attempts and next-cycle re-sends of the same trades carry the **same** `deliveryId` — deduplicate on it to make your consumer idempotent (see [Delivery semantics](#delivery-semantics)). Note the Kraken cross-path caveat: the WS listener and REST poller report different exec IDs for the same multi-match order, so a listener-then-poller re-send can carry different `deliveryId`s — dedupe on `data[].orderId` within a short window as the fallback.
 
 ### CommonFill Contract
 
@@ -538,6 +541,7 @@ Example — IBKR option trade (AVGO call, sold via Flex):
 {
   "relay": "ibkr",
   "type": "trades",
+  "deliveryId": "9c4e12ab7d3f8016",
   "data": [
     {
       "orderId": "684196620",
@@ -568,6 +572,11 @@ Example — IBKR option trade (AVGO call, sold via Flex):
 ```
 
 Rows with `assetClass == "option"` where option metadata is missing or invalid are skipped and surfaced in the `errors` array rather than emitted with an incomplete `option` object. This means any trade that reaches your webhook with `assetClass == "option"` is guaranteed to have a non-null `option` field — the invariant is enforced by the parsers rather than by the type schema (which models `option` as `OptionContract | null` to cover non-option assets).
+
+Each request carries two relay-set headers:
+
+- **`X-Delivery-Id`** — the payload's `deliveryId`, exposed as a header so receivers can dedupe before parsing the body.
+- **`X-Signature-256`** — HMAC-SHA256 of the body.
 
 The payload is signed with HMAC-SHA256. Verify using the `X-Signature-256` header:
 
@@ -796,12 +805,15 @@ Practical consequences when both `KRAKEN_LISTENER_ENABLED=true` and `KRAKEN_POLL
 
 In short: enabling the listener trades fee accuracy for latency. If your consumer needs fees, run poller-only with a shorter `KRAKEN_POLL_INTERVAL`.
 
+The "one webhook" outcomes above describe successful deliveries. While the listener's webhook is still in flight (nothing is marked until it succeeds), the poller defers that order's fills to its next cycle via an in-process in-flight registry rather than double-sending. If a delivery fails or times out, at-least-once semantics apply — see [Delivery semantics](#delivery-semantics).
+
 ### Webhook payload example (Kraken)
 
 ```json
 {
   "relay": "kraken",
   "type": "trades",
+  "deliveryId": "5b0d77e4c2a1f938",
   "data": [
     {
       "orderId": "OXXXXX-XXXXX-XXXXXX",

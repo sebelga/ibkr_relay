@@ -13,6 +13,7 @@ from relay_core.dedup import (
     mark_processed_batch,
     mark_processed_batch_with_orders,
 )
+from relay_core.inflight import INFLIGHT_ORDERS
 from relay_core.notifier.models import WebhookPayloadTrades
 from relay_core.poller_engine import (
     PollerConfig,
@@ -722,3 +723,119 @@ class TestDispatchOrdering:
             "2026-04-06T09:47:31",
             "2026-04-22T09:28:31",
         ]
+
+
+# ═════════════════════════════════════════════════════════════════════
+#  In-flight deferral (listener/poller duplicate window)
+# ═════════════════════════════════════════════════════════════════════
+
+class TestInFlightDeferral:
+    """While the listener's notify is in progress nothing is marked, so
+    the poller must defer those orders instead of double-sending."""
+
+    @pytest.fixture(autouse=True)
+    def _clean_inflight(self) -> Generator[None, None, None]:
+        INFLIGHT_ORDERS._counts.clear()
+        yield
+        INFLIGHT_ORDERS._counts.clear()
+
+    @patch("relay_core.poller_engine.notify")
+    def test_in_flight_order_deferred(
+        self, mock_notify: MagicMock,
+        dedup_db: sqlite3.Connection, meta_db: sqlite3.Connection,
+    ) -> None:
+        fill = _make_fill(execId="TX1", orderId="ORD1")
+        cfg = _MockPollerConfig(parse=lambda _: ([fill], []))
+        _set_poller(cfg)
+
+        INFLIGHT_ORDERS.register("ibkr", {"ORD1"})
+        result = poll_once("ibkr", dedup_conn=dedup_db, meta_conn=meta_db)
+
+        assert result == []
+        mock_notify.assert_not_called()
+        assert get_processed_ids(dedup_db, {"ibkr:TX1"}) == set()
+        # Watermark untouched — the fill must survive the pre-filter next cycle.
+        assert get_last_poll_ts(meta_db, "ibkr") == 0
+
+    @patch("relay_core.poller_engine.notify")
+    def test_released_order_sent_on_next_cycle(
+        self, mock_notify: MagicMock,
+        dedup_db: sqlite3.Connection, meta_db: sqlite3.Connection,
+    ) -> None:
+        fill = _make_fill(execId="TX1", orderId="ORD1")
+        cfg = _MockPollerConfig(parse=lambda _: ([fill], []))
+        _set_poller(cfg)
+
+        INFLIGHT_ORDERS.register("ibkr", {"ORD1"})
+        poll_once("ibkr", dedup_conn=dedup_db, meta_conn=meta_db)
+        INFLIGHT_ORDERS.release("ibkr", {"ORD1"})
+
+        result = poll_once("ibkr", dedup_conn=dedup_db, meta_conn=meta_db)
+        assert len(result) == 1
+        mock_notify.assert_called_once()
+        assert get_processed_ids(dedup_db, {"ibkr:TX1"}) == {"ibkr:TX1"}
+
+    @patch("relay_core.poller_engine.notify")
+    def test_free_orders_still_sent_alongside_deferred(
+        self, mock_notify: MagicMock,
+        dedup_db: sqlite3.Connection, meta_db: sqlite3.Connection,
+    ) -> None:
+        held = _make_fill(execId="TXH", orderId="ORD_HELD",
+                          timestamp="2025-04-03T10:00:00")
+        free = _make_fill(execId="TXF", orderId="ORD_FREE",
+                          timestamp="2025-04-03T12:00:00")
+        cfg = _MockPollerConfig(parse=lambda _: ([held, free], []))
+        _set_poller(cfg)
+
+        INFLIGHT_ORDERS.register("ibkr", {"ORD_HELD"})
+        result = poll_once("ibkr", dedup_conn=dedup_db, meta_conn=meta_db)
+
+        assert [t.orderId for t in result] == ["ORD_FREE"]
+        sent_payload = mock_notify.call_args[0][1]
+        assert [t.orderId for t in sent_payload.data] == ["ORD_FREE"]
+        assert get_processed_ids(dedup_db, {"ibkr:TXH"}) == set()
+
+    @patch("relay_core.poller_engine.notify")
+    def test_watermark_capped_at_deferred_fill(
+        self, mock_notify: MagicMock,
+        dedup_db: sqlite3.Connection, meta_db: sqlite3.Connection,
+    ) -> None:
+        """Sending a later fill while deferring an earlier one must not
+        advance the watermark past the deferred fill — the pre-filter
+        would silently drop it if the listener's notify then failed."""
+        held = _make_fill(execId="TXH", orderId="ORD_HELD",
+                          timestamp="2025-04-03T10:00:00")
+        free = _make_fill(execId="TXF", orderId="ORD_FREE",
+                          timestamp="2025-04-03T12:00:00")
+        cfg = _MockPollerConfig(parse=lambda _: ([held, free], []))
+        _set_poller(cfg)
+
+        INFLIGHT_ORDERS.register("ibkr", {"ORD_HELD"})
+        poll_once("ibkr", dedup_conn=dedup_db, meta_conn=meta_db)
+
+        assert get_last_poll_ts(meta_db, "ibkr") == to_epoch("2025-04-03T10:00:00")
+
+        # Listener failed and released without marking → next cycle delivers.
+        INFLIGHT_ORDERS.release("ibkr", {"ORD_HELD"})
+        result = poll_once("ibkr", dedup_conn=dedup_db, meta_conn=meta_db)
+        assert [t.orderId for t in result] == ["ORD_HELD"]
+
+    @patch("relay_core.poller_engine.notify")
+    def test_watermark_advances_normally_when_deferred_is_latest(
+        self, mock_notify: MagicMock,
+        dedup_db: sqlite3.Connection, meta_db: sqlite3.Connection,
+    ) -> None:
+        """A deferred fill later than every sent fill leaves the watermark
+        at the sent maximum — still <= the deferred timestamp, so the
+        deferred fill remains a candidate next cycle."""
+        free = _make_fill(execId="TXF", orderId="ORD_FREE",
+                          timestamp="2025-04-03T10:00:00")
+        held = _make_fill(execId="TXH", orderId="ORD_HELD",
+                          timestamp="2025-04-03T12:00:00")
+        cfg = _MockPollerConfig(parse=lambda _: ([free, held], []))
+        _set_poller(cfg)
+
+        INFLIGHT_ORDERS.register("ibkr", {"ORD_HELD"})
+        poll_once("ibkr", dedup_conn=dedup_db, meta_conn=meta_db)
+
+        assert get_last_poll_ts(meta_db, "ibkr") == to_epoch("2025-04-03T10:00:00")

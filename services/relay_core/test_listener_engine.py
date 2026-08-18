@@ -18,6 +18,7 @@ from relay_core.dedup import (
     init_db,
     mark_processed_batch,
 )
+from relay_core.inflight import INFLIGHT_ORDERS
 from relay_core.listener_engine import (
     DebounceBuffer,
     _handle_event,
@@ -125,6 +126,66 @@ class TestNamespaceHelpers(unittest.TestCase):
     def test_strip_empty(self) -> None:
         result = _strip_prefix("ibkr", set())
         self.assertEqual(result, set())
+
+
+# ── In-flight registration tests ─────────────────────────────────────
+
+
+class TestInFlightRegistration(unittest.TestCase):
+    """_send_and_mark must hold its orderIds in the in-flight registry for
+    exactly the notify+mark span, releasing on success AND failure — the
+    poller defers registered orders to avoid duplicate webhooks."""
+
+    def setUp(self) -> None:
+        INFLIGHT_ORDERS._counts.clear()
+        self.addCleanup(INFLIGHT_ORDERS._counts.clear)
+
+    @patch("relay_core.listener_engine.mark_processed_batch_with_orders")
+    @patch("relay_core.listener_engine.notify")
+    @patch("relay_core.listener_engine.get_processed_ids", return_value=set())
+    @patch("relay_core.listener_engine._init_dedup_db")
+    def test_order_registered_during_notify(
+        self,
+        mock_init_db: MagicMock,
+        mock_get_ids: MagicMock,
+        mock_notify: MagicMock,
+        mock_mark: MagicMock,
+    ) -> None:
+        mock_init_db.return_value = MagicMock()
+        seen_during_notify: set[str] = set()
+
+        def capture(*args: Any, **kwargs: Any) -> None:
+            seen_during_notify.update(
+                INFLIGHT_ORDERS.intersect("ibkr", {"12345"}),
+            )
+
+        mock_notify.side_effect = capture
+
+        _send_and_mark("ibkr", [_make_fill(order_id="12345")], "/tmp/test.db")
+
+        self.assertEqual(seen_during_notify, {"12345"})
+        # Released after the pipeline completes.
+        self.assertEqual(INFLIGHT_ORDERS.intersect("ibkr", {"12345"}), set())
+
+    @patch("relay_core.listener_engine.mark_processed_batch_with_orders")
+    @patch("relay_core.listener_engine.notify")
+    @patch("relay_core.listener_engine.get_processed_ids", return_value=set())
+    @patch("relay_core.listener_engine._init_dedup_db")
+    def test_order_released_when_notify_fails(
+        self,
+        mock_init_db: MagicMock,
+        mock_get_ids: MagicMock,
+        mock_notify: MagicMock,
+        mock_mark: MagicMock,
+    ) -> None:
+        mock_init_db.return_value = MagicMock()
+        mock_notify.side_effect = RuntimeError("all notifiers failed")
+
+        with self.assertRaises(RuntimeError):
+            _send_and_mark("ibkr", [_make_fill(order_id="12345")], "/tmp/test.db")
+
+        self.assertEqual(INFLIGHT_ORDERS.intersect("ibkr", {"12345"}), set())
+        mock_mark.assert_not_called()
 
 
 # ── _send_and_mark tests ────────────────────────────────────────────

@@ -21,6 +21,7 @@ from relay_core.dedup import (
 from relay_core.dedup import init_db as _init_dedup_db
 from relay_core.env import get_env, get_env_int
 from relay_core.fx import enrich_if_enabled
+from relay_core.inflight import INFLIGHT_ORDERS
 from relay_core.notifier import notify
 from relay_core.notifier.audit import log_fills
 from relay_core.notifier.models import WebhookPayloadTrades
@@ -313,6 +314,26 @@ def poll_once(
                         f.side, f.symbol, f.orderId, window,
                     )
 
+        # In-flight deferral: the listener registers orderIds while its
+        # notify is in progress (nothing marked yet — mark-after-notify).
+        # Sending those fills now would race the listener into a duplicate
+        # webhook; defer them and let the next cycle resolve either way
+        # (listener succeeded → dedup skips; failed → poller delivers).
+        deferred_fills: list[Fill] = []
+        if new_fills:
+            in_flight = INFLIGHT_ORDERS.intersect(
+                relay_name, {f.orderId for f in new_fills},
+            )
+            if in_flight:
+                deferred_fills = [f for f in new_fills if f.orderId in in_flight]
+                new_fills = [f for f in new_fills if f.orderId not in in_flight]
+                for f in deferred_fills:
+                    relay_log.info(
+                        "  In-flight: %s %s orderId=%s "
+                        "(listener notify in progress — deferred to next cycle)",
+                        f.side, f.symbol, f.orderId,
+                    )
+
         relay_log.info("%d new fill(s) after dedup", len(new_fills))
 
         if not new_fills:
@@ -370,8 +391,16 @@ def poll_once(
 
         # Update timestamp watermark to the latest trade time (stored as
         # epoch int; logged with the human-readable ISO source for context).
+        # Deferred in-flight fills cap the watermark: the pre-filter keeps
+        # fills with timestamp >= watermark, so advancing past a deferred
+        # fill would silently drop it if the listener's notify then fails.
+        # Deferred fills passed the pre-filter, so the cap never regresses.
         latest_fill = max(new_fills, key=lambda f: to_epoch(f.timestamp))
         max_ts = to_epoch(latest_fill.timestamp)
+        if deferred_fills:
+            max_ts = min(
+                max_ts, min(to_epoch(f.timestamp) for f in deferred_fills),
+            )
         set_last_poll_ts(meta_conn, max_ts, relay_name, poller_index)
         relay_log.info(
             "Updated timestamp watermark to %d (%s)", max_ts, latest_fill.timestamp,

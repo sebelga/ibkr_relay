@@ -55,6 +55,7 @@ services/                  # Business-logic services
     registry.py            # Relay registry (RELAYS → adapter loading)
     poller_engine.py       # Generic poller (dedup, fetch, parse, notify, mark)
     listener_engine.py     # Generic WS listener (connect, dedup, notify, reconnect)
+    inflight.py            # In-flight order registry (listener/poller duplicate window)
     relay_models.py        # Re-export shim (shared + RunPollResponse, HealthResponse)
     dedup/                 # SQLite dedup library
     notifier/              # Pluggable notification backends (BaseNotifier, webhook.py)
@@ -109,8 +110,8 @@ terraform/                 # Infrastructure as code (DigitalOcean)
 
 - **`main.py`** — reads `RELAYS`, loads adapters via the registry, initialises the relay context (`init_relays()`), starts the HTTP API, then spawns a poll loop per `PollerConfig` and a WS listener per relay (if configured). When `RELAYS` is empty, the API server starts alone (for health checks).
 - **`context.py`** — relay context singleton. `init_relays(relays)` is called once at startup. `get_relay(name)` / `get_relays()` are available anywhere to access relay config (notifiers, retry config, poller/listener configs) without parameter threading.
-- **`poller_engine.poll_once(relay_name, poller_index)`** — resolves `PollerConfig`, notifiers, and retry config from the relay context. Handles two-layer dedup (exec_id + order-level within `2 × interval`), aggregation, notify, and mark.
-- **`listener_engine.start_listener(relay_name)`** — generic WS listener with per-orderId debounce buffer and auto-reconnect with exponential backoff.
+- **`poller_engine.poll_once(relay_name, poller_index)`** — resolves `PollerConfig`, notifiers, and retry config from the relay context. Handles three-layer dedup (exec_id + order-level within `2 × interval` + in-flight deferral), aggregation, notify, and mark.
+- **`listener_engine.start_listener(relay_name)`** — generic WS listener with per-orderId debounce buffer and auto-reconnect with exponential backoff. Registers orderIds in `inflight.py`'s `INFLIGHT_ORDERS` for the notify+mark span so the poller defers them (one-directional by design — see the `inflight.py` module docstring).
 - **`dedup/__init__.py`** — owns the SQLite schema. Three columns on `processed_fills`: `exec_id` (PK), `order_id`, `processed_at`. Idempotent `ALTER TABLE` migration on `init_db`.
 - **`relay_models.py`** — re-export shim for notifier payload contracts + relay-specific API types (`RunPollResponse`, `HealthResponse`). Listed in `schema_gen.py:SCHEMA_MODELS` under `"relay_core.relay_models"`.
 - **`routes/__init__.py`** — `GET /health` (unauthenticated) and `POST /relays/{relay_name}/poll/{poll_idx}` (authenticated, 1-based index).
@@ -126,6 +127,7 @@ Each adapter is a small package that wires broker-specific logic into the generi
 - **Prefix support** — adapters pass `IBKR_` to read from `IBKR_TARGET_WEBHOOK_URL`, etc. Enables per-relay destinations.
 - **Suffix support** — `_2` suffixed env vars enable separate destinations for multi-account pollers.
 - Adding a new backend: create `services/relay_core/notifier/<name>.py` with a class extending `BaseNotifier`, add to `REGISTRY`. The constructor must validate all required env vars and raise `SystemExit` on misconfiguration.
+- Webhook requests carry `X-Signature-256` (HMAC-SHA256 of the body) and `X-Delivery-Id` (content-derived dedup key, auto-computed on `WebhookPayloadTrades`). Delivery is at-least-once — see "Delivery semantics" in the README.
 
 ## Dedup package
 
